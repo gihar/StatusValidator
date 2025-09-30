@@ -100,7 +100,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--checkdate",
         action="store_true",
         help=(
-            "Force revalidation for a single row when its existing 'Check date' is from a prior week"
+            "Force revalidation for rows whose existing 'Check date' is missing, invalid, or from a prior week"
         ),
     )
     return parser.parse_args(argv)
@@ -269,7 +269,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                             model_value or None
                         )
 
-    checkdate_force_remaining = 1 if args.checkdate else 0
     current_week_start = None
     if args.checkdate:
         now = datetime.now()
@@ -306,10 +305,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         )
 
                     force_reason: str | None = None
-                    force_without_limit = False
                     if not (existing_check_date_value or "").strip():
                         force_reason = "missing Check date"
-                        force_without_limit = True
                     else:
                         parsed_check_date = _parse_check_date_value(existing_check_date_value)
                         if parsed_check_date is None:
@@ -323,15 +320,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                             force_reason = f"stale Check date '{existing_check_date_value}'"
 
                     if force_reason is not None:
-                        if force_without_limit or checkdate_force_remaining > 0:
-                            should_force_current = True
-                            if not force_without_limit:
-                                checkdate_force_remaining -= 1
-                            LOGGER.info(
-                                "Forcing revalidation for row %s due to %s",
-                                entry.row_number,
-                                force_reason,
-                            )
+                        should_force_current = True
+                        LOGGER.info(
+                            "Forcing revalidation for row %s due to %s",
+                            entry.row_number,
+                            force_reason,
+                        )
 
                 comment_hash = compute_comment_hash(entry.comment_text)
                 cached_payload = None

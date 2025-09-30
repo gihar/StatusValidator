@@ -72,7 +72,7 @@ Useful flags:
 - `--limit N` processes only the first `N` data rows (for testing).
 - `--verbose` enables debug logging.
 - `--force` ignores the cache and asks the LLM to revalidate every row.
-- `--checkdate` refreshes any rows that either lack a "Check date" value or have a timestamp from a previous week, forcing a single LLM call for stale rows and unlimited calls for missing dates.
+- `--checkdate` refreshes all rows that either lack a "Check date" value, contain an invalid timestamp, or have a timestamp from a previous week, forcing revalidation of every matching entry.
 
 By default the tool stores cached responses in an SQLite file next to the configuration. Set `cache_path` in the YAML to relocate the cache or remove the file to reset the stored answers.
 
