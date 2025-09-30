@@ -1,0 +1,43 @@
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# Virtual environment
+.venv/
+
+# IDE/editor settings
+.vscode/
+.idea/
+.DS_Store
+
+# Test/coverage outputs
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# Logs
+*.log
+
+# Secret and config files
+.env
+*.env
+service-account.json
+statusvalidator-*.json
+config.yaml
+
+# Compiled localization files
+*.mo
+
+# Misc caches
+.cache/
+*.sqlite
+

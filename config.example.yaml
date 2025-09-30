@@ -1,0 +1,31 @@
+sheets:
+  credentials_file: /absolute/path/to/service-account.json
+  source_spreadsheet_id: 0000000000000000000000000000000000000000000
+  source_sheet_name: Statuses
+  source_sheet_gid: 0
+  target_spreadsheet_id: 1111111111111111111111111111111111111111111
+  target_sheet_name: Status Review
+columns:
+  status: Status
+  comment: Comment
+  completion_date: Completion Date
+  identifier: Project
+  project_manager: Project Manager
+allowed_statuses:
+  - On Track
+  - At Risk
+  - Delayed
+header_row: 1
+data_start_row: 2
+rules_text: |
+  Paste the rulebook text here. It will be forwarded to the LLM as context for validation.
+data_start_row: 12
+llm:
+  model_env: OPENAI_MODEL
+  temperature: 0.0
+  max_output_tokens: 1024
+  max_retries: 3
+  api_key_env: OPENAI_API_KEY
+  base_url_env: OPENAI_BASE_URL
+batch_size: 10
+cache_path: ./build/status_cache.sqlite
