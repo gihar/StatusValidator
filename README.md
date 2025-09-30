@@ -136,7 +136,7 @@ status-validator --config config.yaml
 2. Clone the repository on the target host:
 
    ```bash
-   git clone https://github.com/your-org/StatusValidator.git
+   git clone https://github.com/gihar/StatusValidator.git
    cd StatusValidator
    ```
 
@@ -295,7 +295,7 @@ status-validator --config config.yaml
 2. Клонируйте репозиторий на сервер:
 
    ```bash
-   git clone https://github.com/your-org/StatusValidator.git
+   git clone https://github.com/gihar/StatusValidator.git
    cd StatusValidator
    ```
 
