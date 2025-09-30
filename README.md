@@ -72,6 +72,7 @@ Useful flags:
 - `--limit N` processes only the first `N` data rows (for testing).
 - `--verbose` enables debug logging.
 - `--force` ignores the cache and asks the LLM to revalidate every row.
+- `--checkdate` refreshes any rows that either lack a "Check date" value or have a timestamp from a previous week, forcing a single LLM call for stale rows and unlimited calls for missing dates.
 
 By default the tool stores cached responses in an SQLite file next to the configuration. Set `cache_path` in the YAML to relocate the cache or remove the file to reset the stored answers.
 
@@ -84,6 +85,7 @@ Every processed row produces the following fields in the result sheet:
 - Bullet list with remarks from the LLM.
 - Full rewrite suggestion that complies with the rulebook.
 - Raw JSON returned by the LLM for traceability.
+- Automatic check timestamp in the "Check date" column and the LLM identifier written to the "Model" column.
 
 ## Local Validation
 To check the project compiles:
