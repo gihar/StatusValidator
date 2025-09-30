@@ -2,26 +2,61 @@
 
 Python tool that reads project status updates from Google Sheets, validates them with an LLM, and writes structured review results back to a separate sheet.
 
-## Features
-- Loads source statuses and comments from a configurable Google Sheet.
-- Sends each entry to an LLM together with the validation rules and allowed status list.
-- Collects machine generated review notes and rewrite suggestions.
-- Publishes the findings to a result sheet, including a direct link back to the source row.
-- Caches LLM responses per row and reuses them when the status and comment stay the same.
+## Table of Contents
+- [English Version](#english-version)
+  - [Overview](#overview)
+  - [Features](#features)
+  - [Requirements](#requirements)
+  - [Installation](#installation)
+  - [Configuration](#configuration)
+  - [Usage](#usage)
+  - [Command-line Flags](#command-line-flags)
+  - [Remote Deployment](#remote-deployment)
+  - [Scheduled Runs](#scheduled-runs)
+    - [Cron](#cron)
+    - [systemd timer](#systemd-timer)
+  - [Output](#output)
+  - [Local Validation](#local-validation)
+- [Русская версия](#русская-версия)
+  - [Краткое описание](#краткое-описание)
+  - [Возможности](#возможности)
+  - [Требования](#требования)
+  - [Установка](#установка)
+  - [Конфигурация](#конфигурация)
+  - [Запуск](#запуск)
+  - [Опции командной строки](#опции-командной-строки)
+  - [Удаленное развертывание](#удаленное-развертывание)
+  - [Планирование запуска](#планирование-запуска)
+    - [Cron](#cron-1)
+    - [systemd timer](#systemd-timer-1)
+  - [Результаты](#результаты)
+  - [Локальная проверка](#локальная-проверка)
 
-## Requirements
+## English Version
+
+### Overview
+Status Validator automates the review of project status updates: it pulls rows from a Google Sheet, evaluates them with an LLM, and writes structured feedback to a results sheet.
+
+### Features
+- Loads status text and comments from a configurable Google Sheet.
+- Sends each row to an LLM together with custom rules and allowed statuses.
+- Captures model feedback, including rewrite suggestions.
+- Publishes findings to a target sheet with hyperlinks to the original rows.
+- Reuses cached LLM answers while status and comment remain unchanged.
+
+### Requirements
 - Python 3.10 or newer.
 - Google service account with access to the source and target spreadsheets.
-- OpenAI compatible API key with access to the requested model.
+- OpenAI-compatible API key with access to the chosen model.
 
-Install dependencies:
+### Installation
 
 ```bash
 pip install -e .
 ```
 
-## Configuration
-Create a YAML file (see `config.example.yaml`) that describes the sheets, columns, validation rules, and LLM settings. Example:
+### Configuration
+Create a YAML file (see `config.example.yaml`) that describes sheets, columns, validation rules, and LLM settings. Example:
 
 ```yaml
 sheets:
@@ -55,121 +90,262 @@ batch_size: 10
 cache_path: ./build/status_cache.sqlite  # optional, defaults next to the config file
 ```
 
-> Place the OpenAI API key in the environment variable declared in `api_key_env` (default `OPENAI_API_KEY`).
-> Environment variables from a `.env` file located in the working directory or next to the config file are loaded automatically, so you can keep secrets out of the YAML.
-> Set `data_start_row` to the first data row number (1-based). The row immediately above must contain the column headers used for mapping.
-> If the headers are located below the first row, adjust `header_row` accordingly.
+**Parameter reference**
+- `sheets.credentials_file` — path to the Google service-account JSON key.
+- `sheets.source_spreadsheet_id` — ID of the spreadsheet containing source statuses (from the URL).
+- `sheets.source_sheet_name` — sheet name with source data.
+- `sheets.source_sheet_gid` — numeric `gid` used to generate direct row links (optional).
+- `sheets.target_spreadsheet_id` — ID of the spreadsheet used for validation results.
+- `sheets.target_sheet_name` — sheet name for the result table.
+- `columns.status` — column containing the status text.
+- `columns.comment` — column with the explanatory comment.
+- `columns.completion_date` — column with completion dates (optional).
+- `columns.identifier` — column containing a unique project name; enables updates by identifier.
+- `columns.project_manager` — column with the responsible manager’s name (optional).
+- `allowed_statuses` — list of valid status values; anything else is treated as invalid.
+- `rules_text` — full validation rulebook supplied verbatim to the LLM.
+- `header_row` — row number (1-based) containing column headers.
+- `data_start_row` — first data row number (1-based) below the header.
+- `llm.model_env` — environment variable that stores the model identifier (use `llm.model` for a literal value).
+- `llm.temperature` — sampling temperature for the model; keep `0` for deterministic outputs.
+- `llm.max_output_tokens` — maximum number of tokens returned by the model.
+- `llm.api_key_env` — environment variable that holds the API key.
+- `llm.base_url_env` — environment variable with a custom API base URL (optional).
+- `batch_size` — number of rows processed per LLM batch.
+- `cache_path` — path to the SQLite cache; defaults to a file next to the YAML config.
 
-## Usage
-Run the CLI after preparing the configuration file:
+> Place the OpenAI API key in the environment variable declared in `llm.api_key_env` (default `OPENAI_API_KEY`).
+> Environment variables from a `.env` file located in the working directory or next to the config file are loaded automatically.
+> Set `data_start_row` to the first data row number (1-based); the row above must contain the headers.
+
+### Usage
 
 ```bash
 status-validator --config config.yaml
 ```
 
-Useful flags:
-- `--dry-run` prints the result table instead of writing to the target sheet.
-- `--limit N` processes only the first `N` data rows (for testing).
-- `--verbose` enables debug logging.
-- `--force` ignores the cache and asks the LLM to revalidate every row.
-- `--checkdate` refreshes all rows that either lack a "Check date" value, contain an invalid timestamp, or have a timestamp from a previous week, forcing revalidation of every matching entry.
+### Command-line Flags
+- `--dry-run` prints the result table to stdout instead of writing to Google Sheets.
+- `--limit N` processes only the first `N` rows (useful for testing).
+- `--verbose` enables debug-level logging.
+- `--force` ignores the cache and revalidates every row.
+- `--checkdate` revalidates rows whose "Check date" is missing, invalid, or older than the current week.
 
-By default the tool stores cached responses in an SQLite file next to the configuration. Set `cache_path` in the YAML to relocate the cache or remove the file to reset the stored answers.
+### Remote Deployment
+1. Provision Python 3.10+ and gather credentials (service-account JSON and `config.yaml`).
+2. Clone the repository on the target host:
 
-## Remote Deployment
-1. **Provision Python and credentials.** Ensure the remote host has Python 3.10+ and copy the service account JSON plus your `config.yaml` (or fetch them from a secrets manager at runtime).
-2. **Clone the repository.**
    ```bash
-   ssh user@server
    git clone https://github.com/your-org/StatusValidator.git
    cd StatusValidator
    ```
-3. **Create a virtual environment and install dependencies.**
+
+3. Create a virtual environment and install dependencies:
+
    ```bash
    python3 -m venv venv
    source venv/bin/activate
    pip install --upgrade pip
    pip install -e .
    ```
-4. **Configure secrets.** Place environment variables (for example `OPENAI_API_KEY`) in a `.env` file in the project root or alongside the YAML config so they load automatically. Keep `service-account.json` outside of version control and update `config.yaml` to point to the deployed path.
-5. **Dry-run validation.** Confirm connectivity and credentials before automating:
+
+4. Configure environment variables (for example `OPENAI_API_KEY`) in a `.env` file and ensure `config.yaml` points to the deployed paths.
+5. Perform a dry run to confirm connectivity:
+
    ```bash
    venv/bin/status-validator --config /path/to/config.yaml --dry-run --limit 5
    ```
 
-## Scheduled Runs
-Two common options are shown below; pick the one that matches your infrastructure standards. In both cases wrap the CLI call in a tiny shell script that activates the virtual environment and loads `.env`.
+### Scheduled Runs
+Create `run_status_validator.sh` to activate the virtual environment, load `.env`, and launch the CLI. Then pick a scheduler.
 
-Create `run_status_validator.sh` in the project root:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
-set -a; [ -f .env ] && source .env; set +a
-source venv/bin/activate
-status-validator --config /path/to/config.yaml --checkdate >> logs/status-validator.log 2>&1
-```
-
-Make it executable: `chmod +x run_status_validator.sh` and ensure the `logs/` directory exists.
-
-### Cron
-Edit the crontab (`crontab -e`) and schedule the script, for example every weekday at 07:00 server time:
+#### Cron
 
 ```
 0 7 * * 1-5 /home/user/StatusValidator/run_status_validator.sh
 ```
 
-### systemd timer
-Create `/etc/systemd/system/status-validator.service`:
-
-```
-[Unit]
-Description=Status Validator
-After=network-online.target
-
-[Service]
-Type=oneshot
-WorkingDirectory=/home/user/StatusValidator
-ExecStart=/home/user/StatusValidator/run_status_validator.sh
-```
-
-Create `/etc/systemd/system/status-validator.timer`:
-
-```
-[Unit]
-Description=Run Status Validator on schedule
-
-[Timer]
-OnCalendar=Mon..Fri 07:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-Reload systemd (`sudo systemctl daemon-reload`), enable and start the timer:
+#### systemd timer
+Create `/etc/systemd/system/status-validator.service` and `/etc/systemd/system/status-validator.timer`, then run:
 
 ```bash
 sudo systemctl enable --now status-validator.timer
 ```
 
-## Output
-Every processed row produces the following fields in the result sheet:
-- Row number and direct link to the original entry.
-- Project name taken from the column referenced by `columns.identifier` (if configured) and rendered as a hyperlink to the original row.
+### Output
+Each validated row produces the following columns:
+- Row number and direct link back to the original entry.
+- Project name (from `columns.identifier`) rendered as a hyperlink when available.
 - Original status, comment, and completion date.
 - Validation flag (`YES`/`NO`).
-- Bullet list with remarks from the LLM.
-- Full rewrite suggestion that complies with the rulebook.
-- Raw JSON returned by the LLM for traceability.
-- Automatic check timestamp in the "Check date" column and the LLM identifier written to the "Model" column.
+- Bullet list with LLM remarks.
+- Rewrite suggestion aligned with the rulebook.
+- Raw LLM JSON for traceability.
+- "Check date" timestamp plus the LLM model identifier.
 
-## Local Validation
-To check the project compiles:
+### Local Validation
 
 ```bash
 python -m compileall status_validator
 ```
 
-Additional tests can be added under `tests/` with `pytest` if needed.
+Add automated tests under `tests/` and run `pytest` as needed.
+
+## Русская версия
+
+### Краткое описание
+Status Validator автоматизирует проверку статусов проектов: загружает строки из Google Sheets, валидирует их с помощью LLM и записывает структурированную обратную связь на лист с результатами.
+
+### Возможности
+- Загружает статусы и комментарии из настраиваемой Google-таблицы.
+- Передает каждую строку в LLM вместе с правилами и допустимыми статусами.
+- Фиксирует замечания модели, включая предложения по переписыванию текста.
+- Публикует результаты на целевом листе с гиперссылками на исходные строки.
+- Переиспользует кэшированные ответы LLM, пока статус и комментарий не меняются.
+
+### Требования
+- Python 3.10 или новее.
+- Сервисный аккаунт Google с доступом к исходной и целевой таблицам.
+- API-ключ, совместимый с OpenAI, с доступом к выбранной модели.
+
+### Установка
+
+```bash
+pip install -e .
+```
+
+### Конфигурация
+Создайте YAML-файл (см. `config.example.yaml`), в котором описаны таблицы, колонки, правила проверки и настройки LLM. Пример:
+
+```yaml
+sheets:
+  credentials_file: /path/to/service-account.json
+  source_spreadsheet_id: 1AbCdEfGhIjKlMn
+  source_sheet_name: Statuses
+  source_sheet_gid: 123456789  # optional, enables direct row links
+  target_spreadsheet_id: 1ZyXwVuTsRqPoNm
+  target_sheet_name: Status Review
+columns:
+  status: Статус
+  comment: Комментарий
+  completion_date: Дата завершения
+  identifier: Наименование проекта
+  project_manager: Руководитель проекта
+allowed_statuses:
+  - В графике
+  - Есть риски
+  - Отстает
+rules_text: |
+  (Paste the full validation rulebook here. It will be passed to the LLM verbatim.)
+header_row: 1  # row with column titles
+data_start_row: 2  # first data row (1-based) below the header
+llm:
+  model_env: OPENAI_MODEL  # or set `model` directly
+  temperature: 0
+  max_output_tokens: 1024
+  api_key_env: OPENAI_API_KEY
+  base_url_env: OPENAI_BASE_URL  # optional, overrides API host via env variable
+batch_size: 10
+cache_path: ./build/status_cache.sqlite  # optional, defaults next to the config file
+```
+
+**Справочник параметров**
+- `sheets.credentials_file` — путь к JSON-ключу сервисного аккаунта Google.
+- `sheets.source_spreadsheet_id` — идентификатор таблицы со статусами (из URL).
+- `sheets.source_sheet_name` — лист с исходными данными.
+- `sheets.source_sheet_gid` — числовой `gid`, позволяющий формировать прямые ссылки на строки (опционально).
+- `sheets.target_spreadsheet_id` — идентификатор таблицы с результатами проверки.
+- `sheets.target_sheet_name` — лист, куда записываются результаты.
+- `columns.status` — колонка со статусом.
+- `columns.comment` — колонка с пояснительным комментарием.
+- `columns.completion_date` — колонка с датой завершения (опционально).
+- `columns.identifier` — колонка с уникальным названием проекта; позволяет обновлять строки по идентификатору.
+- `columns.project_manager` — колонка с именем ответственного менеджера (опционально).
+- `allowed_statuses` — список допустимых значений статуса; другие значения считаются некорректными.
+- `rules_text` — полный набор правил проверки, передаваемый LLM без изменений.
+- `header_row` — номер строки (с единицы), в которой находятся заголовки.
+- `data_start_row` — номер первой строки с данными под заголовками (с единицы).
+- `llm.model_env` — имя переменной окружения с идентификатором модели (или используйте `llm.model`).
+- `llm.temperature` — температура выборки модели; оставьте `0` для детерминированных ответов.
+- `llm.max_output_tokens` — максимальное количество токенов в ответе модели.
+- `llm.api_key_env` — имя переменной окружения с API-ключом.
+- `llm.base_url_env` — имя переменной окружения с кастомным базовым URL API (опционально).
+- `batch_size` — количество строк, обрабатываемых за один батч LLM.
+- `cache_path` — путь к файлу SQLite-кэша; по умолчанию создается рядом с YAML-файлом.
+
+> Разместите ключ API в переменной окружения, указанной в `llm.api_key_env` (по умолчанию `OPENAI_API_KEY`).
+> Переменные окружения из `.env` в рабочей директории или рядом с конфигом подхватываются автоматически.
+> `data_start_row` должен указывать на первую строку данных; строка выше содержит заголовки.
+
+### Запуск
+
+```bash
+status-validator --config config.yaml
+```
+
+### Опции командной строки
+- `--dry-run` — выводит таблицу результатов в stdout вместо записи в Google Sheets.
+- `--limit N` — обрабатывает только первые `N` строк (удобно для тестирования).
+- `--verbose` — включает детализированный лог.
+- `--force` — игнорирует кэш и повторно валидирует каждую строку.
+- `--checkdate` — принудительно проверяет строки с пустой, некорректной или устаревшей датой в колонке "Check date".
+
+### Удаленное развертывание
+1. Установите Python 3.10+ и подготовьте учетные данные (JSON сервисного аккаунта и `config.yaml`).
+2. Клонируйте репозиторий на сервер:
+
+   ```bash
+   git clone https://github.com/your-org/StatusValidator.git
+   cd StatusValidator
+   ```
+
+3. Создайте виртуальное окружение и установите зависимости:
+
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install --upgrade pip
+   pip install -e .
+   ```
+
+4. Настройте переменные окружения (например, `OPENAI_API_KEY`) в `.env` и убедитесь, что пути в `config.yaml` актуальны.
+5. Выполните пробный запуск:
+
+   ```bash
+   venv/bin/status-validator --config /path/to/config.yaml --dry-run --limit 5
+   ```
+
+### Планирование запуска
+Создайте скрипт `run_status_validator.sh`, который активирует виртуальное окружение, загружает `.env` и запускает CLI, затем выберите планировщик.
+
+#### Cron
+
+```
+0 7 * * 1-5 /home/user/StatusValidator/run_status_validator.sh
+```
+
+#### systemd timer
+Создайте `/etc/systemd/system/status-validator.service` и `/etc/systemd/system/status-validator.timer`, после чего выполните:
+
+```bash
+sudo systemctl enable --now status-validator.timer
+```
+
+### Результаты
+Каждая проверенная строка формирует следующие колонки:
+- Номер строки и прямая ссылка на исходную запись.
+- Название проекта (из `columns.identifier`) в виде гиперссылки при наличии значения.
+- Исходный статус, комментарий и дата завершения.
+- Флаг валидации (`YES`/`NO`).
+- Список замечаний от LLM.
+- Предложение по переписыванию, соответствующее правилам.
+- Сырой JSON от LLM для аудита.
+- Отметка времени в колонке "Check date" и идентификатор модели в колонке "Model".
+
+### Локальная проверка
+
+```bash
+python -m compileall status_validator
+```
+
+При необходимости добавьте автотесты в каталог `tests/` и запустите `pytest`.
