@@ -76,6 +76,84 @@ Useful flags:
 
 By default the tool stores cached responses in an SQLite file next to the configuration. Set `cache_path` in the YAML to relocate the cache or remove the file to reset the stored answers.
 
+## Remote Deployment
+1. **Provision Python and credentials.** Ensure the remote host has Python 3.10+ and copy the service account JSON plus your `config.yaml` (or fetch them from a secrets manager at runtime).
+2. **Clone the repository.**
+   ```bash
+   ssh user@server
+   git clone https://github.com/your-org/StatusValidator.git
+   cd StatusValidator
+   ```
+3. **Create a virtual environment and install dependencies.**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install --upgrade pip
+   pip install -e .
+   ```
+4. **Configure secrets.** Place environment variables (for example `OPENAI_API_KEY`) in a `.env` file in the project root or alongside the YAML config so they load automatically. Keep `service-account.json` outside of version control and update `config.yaml` to point to the deployed path.
+5. **Dry-run validation.** Confirm connectivity and credentials before automating:
+   ```bash
+   venv/bin/status-validator --config /path/to/config.yaml --dry-run --limit 5
+   ```
+
+## Scheduled Runs
+Two common options are shown below; pick the one that matches your infrastructure standards. In both cases wrap the CLI call in a tiny shell script that activates the virtual environment and loads `.env`.
+
+Create `run_status_validator.sh` in the project root:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+set -a; [ -f .env ] && source .env; set +a
+source venv/bin/activate
+status-validator --config /path/to/config.yaml --checkdate >> logs/status-validator.log 2>&1
+```
+
+Make it executable: `chmod +x run_status_validator.sh` and ensure the `logs/` directory exists.
+
+### Cron
+Edit the crontab (`crontab -e`) and schedule the script, for example every weekday at 07:00 server time:
+
+```
+0 7 * * 1-5 /home/user/StatusValidator/run_status_validator.sh
+```
+
+### systemd timer
+Create `/etc/systemd/system/status-validator.service`:
+
+```
+[Unit]
+Description=Status Validator
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/user/StatusValidator
+ExecStart=/home/user/StatusValidator/run_status_validator.sh
+```
+
+Create `/etc/systemd/system/status-validator.timer`:
+
+```
+[Unit]
+Description=Run Status Validator on schedule
+
+[Timer]
+OnCalendar=Mon..Fri 07:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Reload systemd (`sudo systemctl daemon-reload`), enable and start the timer:
+
+```bash
+sudo systemctl enable --now status-validator.timer
+```
+
 ## Output
 Every processed row produces the following fields in the result sheet:
 - Row number and direct link to the original entry.
