@@ -41,9 +41,6 @@ def build_validation_messages(
         - Validate format requirements, date ranges, allowed status names, and logical
           completeness (what is done, current work, next milestones, risks).
         - If information is missing, explain exactly what is missing and why it matters.
-        - For dates, ensure DD.MM.YYYY or DD-MM-YYYY format
-        - Ensure that the status date is before or equal to the Monday of the current week referenced in the status text. 
-          If the project status is «Завершен» or «Завершен (АБ тест)» or «Отменен», the status date can be any date or empty.
         - Pay attention to mismatches between the status column value and the comment body.
         - If the status column contains a value that is not in the allowed list, include this as
           a critical issue.
