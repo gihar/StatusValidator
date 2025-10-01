@@ -22,11 +22,21 @@ rules_text: |
   Paste the rulebook text here. It will be forwarded to the LLM as context for validation.
 data_start_row: 12
 llm:
-  model_env: OPENAI_MODEL
-  temperature: 0.0
-  max_output_tokens: 1024
   max_retries: 3
-  api_key_env: OPENAI_API_KEY
-  base_url_env: OPENAI_BASE_URL
+  providers:
+    1:
+      name: primary
+      model_env: OPENAI_MODEL_1
+      api_key_env: OPENAI_API_KEY_1
+      base_url_env: OPENAI_BASE_URL_1
+      temperature: 0.0
+      max_output_tokens: 1024
+    2:
+      name: fallback
+      model_env: OPENAI_MODEL_2
+      api_key_env: OPENAI_API_KEY_2
+      base_url_env: OPENAI_BASE_URL_2
+      temperature: 0.0
+      max_output_tokens: 1024
 batch_size: 10
 cache_path: ./build/status_cache.sqlite

@@ -46,21 +46,100 @@ class SheetsConfig(BaseModel):
         return value.expanduser().resolve()
 
 
-class LLMConfig(BaseModel):
-    model: str | None = Field(None, description="LLM model identifier; optional when model_env is set")
-    model_env: str = Field("OPENAI_MODEL", description="Environment variable name for the model identifier")
-    temperature: float = Field(0.0, ge=0.0, le=2.0)
-    max_output_tokens: int = Field(1024, gt=0)
-    max_retries: int = Field(3, ge=1, description="Number of attempts for recovering from invalid JSON")
-    api_key: Optional[str] = Field(
+class LLMProviderConfig(BaseModel):
+    """Settings for a single prioritized LLM provider."""
+
+    name: str | None = Field(
+        None,
+        description="Human-friendly name for the provider; used for logging",
+    )
+    model: str | None = Field(
+        None,
+        description="LLM model identifier; optional when model_env is provided",
+    )
+    model_env: str | None = Field(
+        None,
+        description="Environment variable with the model identifier",
+    )
+    temperature: float = Field(
+        0.0,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature for this provider",
+    )
+    max_output_tokens: int = Field(
+        1024,
+        gt=0,
+        description="Maximum number of tokens returned by the provider",
+    )
+    api_key: str | None = Field(
         None,
         description="Explicit API key; if omitted the key is read from api_key_env",
     )
-    api_key_env: str = Field("OPENAI_API_KEY", description="Environment variable with the API key")
-    base_url: Optional[str] = Field(None, description="Optional override for the API base URL")
-    base_url_env: str = Field("OPENAI_BASE_URL", description="Environment variable name for the API base URL")
-    organization: Optional[str] = Field(None, description="Optional OpenAI organization identifier")
-    request_timeout: int = Field(60, gt=0, description="Timeout in seconds for API requests")
+    api_key_env: str | None = Field(
+        None,
+        description="Environment variable with the API key",
+    )
+    base_url: str | None = Field(
+        None,
+        description="Optional override for the API base URL",
+    )
+    base_url_env: str | None = Field(
+        None,
+        description="Environment variable name for the API base URL",
+    )
+    organization: str | None = Field(
+        None,
+        description="Optional OpenAI organization identifier",
+    )
+    request_timeout: int = Field(
+        60,
+        gt=0,
+        description="Timeout in seconds for API requests",
+    )
+
+    @model_validator(mode="after")
+    def _ensure_required_fields(self) -> "LLMProviderConfig":
+        if not self.model and not self.model_env:
+            raise ValueError("LLM provider must define 'model' or 'model_env'")
+        if not self.api_key and not self.api_key_env:
+            raise ValueError("LLM provider must define 'api_key' or 'api_key_env'")
+        return self
+
+
+class LLMConfig(BaseModel):
+    max_retries: int = Field(
+        3,
+        ge=1,
+        description="Number of attempts per provider before switching to the next one",
+    )
+    providers: dict[int, LLMProviderConfig] = Field(
+        ...,
+        description="Mapping of priority -> provider configuration",
+    )
+
+    @field_validator("providers")
+    @classmethod
+    def _validate_providers(
+        cls, value: dict[int, LLMProviderConfig]
+    ) -> dict[int, LLMProviderConfig]:
+        if not value:
+            raise ValueError("At least one LLM provider must be configured")
+
+        ordered_items = sorted(value.items(), key=lambda item: item[0])
+        priorities = [priority for priority, _ in ordered_items]
+
+        expected = list(range(1, len(ordered_items) + 1))
+        if priorities != expected:
+            raise ValueError(
+                "LLM provider priorities must be consecutive integers starting from 1"
+            )
+
+        return dict(ordered_items)
+
+    @property
+    def provider_sequence(self) -> List[tuple[int, LLMProviderConfig]]:
+        return list(self.providers.items())
 
 
 class AppConfig(BaseModel):

@@ -82,11 +82,22 @@ rules_text: |
 header_row: 1  # row with column titles
 data_start_row: 2  # first data row (1-based) below the header
 llm:
-  model_env: OPENAI_MODEL  # or set `model` directly
-  temperature: 0
-  max_output_tokens: 1024
-  api_key_env: OPENAI_API_KEY
-  base_url_env: OPENAI_BASE_URL  # optional, overrides API host via env variable
+  max_retries: 3
+  providers:
+    1:
+      name: primary  # highest priority
+      model_env: OPENAI_MODEL_1
+      api_key_env: OPENAI_API_KEY_1
+      base_url_env: OPENAI_BASE_URL_1  # optional, overrides API host via env variable
+      temperature: 0
+      max_output_tokens: 1024
+    2:
+      name: fallback-openrouter
+      model_env: OPENAI_MODEL_2
+      api_key_env: OPENAI_API_KEY_2
+      base_url_env: OPENAI_BASE_URL_2
+      temperature: 0
+      max_output_tokens: 1024
 batch_size: 10
 cache_path: ./build/status_cache.sqlite  # optional, defaults next to the config file
 ```
@@ -108,15 +119,17 @@ cache_path: ./build/status_cache.sqlite  # optional, defaults next to the config
 - `rules_text` — full validation rulebook supplied verbatim to the LLM.
 - `header_row` — row number (1-based) containing column headers.
 - `data_start_row` — first data row number (1-based) below the header.
-- `llm.model_env` — environment variable that stores the model identifier (use `llm.model` for a literal value).
-- `llm.temperature` — sampling temperature for the model; keep `0` for deterministic outputs.
-- `llm.max_output_tokens` — maximum number of tokens returned by the model.
-- `llm.api_key_env` — environment variable that holds the API key.
-- `llm.base_url_env` — environment variable with a custom API base URL (optional).
+- `llm.max_retries` — number of retries per provider before failing over to the next one.
+- `llm.providers` — mapping of numeric priorities to provider profiles; lower numbers run first.
+- `llm.providers.N.model_env` — env var that stores the model identifier for provider `N` (or specify `model` directly).
+- `llm.providers.N.api_key_env` — env var that stores the API key for provider `N` (or specify `api_key` directly).
+- `llm.providers.N.base_url_env` — env var with a custom API host for provider `N` (optional).
+- `llm.providers.N.temperature` — sampling temperature for provider `N`; keep `0` for deterministic outputs.
+- `llm.providers.N.max_output_tokens` — maximum number of tokens returned by provider `N`.
 - `batch_size` — number of rows processed per LLM batch.
 - `cache_path` — path to the SQLite cache; defaults to a file next to the YAML config.
 
-> Place the OpenAI API key in the environment variable declared in `llm.api_key_env` (default `OPENAI_API_KEY`).
+> Place each API key in the environment variable declared in the corresponding provider block (for example `llm.providers.1.api_key_env` → `OPENAI_API_KEY_1`). Provide `OPENAI_API_KEY_2`, `OPENAI_API_KEY_3`, ... for fallback providers as needed.
 > Environment variables from a `.env` file located in the working directory or next to the config file are loaded automatically.
 > Set `data_start_row` to the first data row number (1-based); the row above must contain the headers.
 
@@ -244,11 +257,22 @@ rules_text: |
 header_row: 1  # row with column titles
 data_start_row: 2  # first data row (1-based) below the header
 llm:
-  model_env: OPENAI_MODEL  # or set `model` directly
-  temperature: 0
-  max_output_tokens: 1024
-  api_key_env: OPENAI_API_KEY
-  base_url_env: OPENAI_BASE_URL  # optional, overrides API host via env variable
+  max_retries: 3
+  providers:
+    1:
+      name: primary  # наивысший приоритет
+      model_env: OPENAI_MODEL_1
+      api_key_env: OPENAI_API_KEY_1
+      base_url_env: OPENAI_BASE_URL_1  # опционально, для смены хоста API
+      temperature: 0
+      max_output_tokens: 1024
+    2:
+      name: fallback-openrouter
+      model_env: OPENAI_MODEL_2
+      api_key_env: OPENAI_API_KEY_2
+      base_url_env: OPENAI_BASE_URL_2
+      temperature: 0
+      max_output_tokens: 1024
 batch_size: 10
 cache_path: ./build/status_cache.sqlite  # optional, defaults next to the config file
 ```
@@ -270,15 +294,17 @@ cache_path: ./build/status_cache.sqlite  # optional, defaults next to the config
 - `rules_text` — полный набор правил проверки, передаваемый LLM без изменений.
 - `header_row` — номер строки (с единицы), в которой находятся заголовки.
 - `data_start_row` — номер первой строки с данными под заголовками (с единицы).
-- `llm.model_env` — имя переменной окружения с идентификатором модели (или используйте `llm.model`).
-- `llm.temperature` — температура выборки модели; оставьте `0` для детерминированных ответов.
-- `llm.max_output_tokens` — максимальное количество токенов в ответе модели.
-- `llm.api_key_env` — имя переменной окружения с API-ключом.
-- `llm.base_url_env` — имя переменной окружения с кастомным базовым URL API (опционально).
+- `llm.max_retries` — количество попыток на один провайдер перед переключением к следующему.
+- `llm.providers` — отображение «приоритет → настройки провайдера»; сначала используется профиль с меньшим номером.
+- `llm.providers.N.model_env` — имя переменной окружения с идентификатором модели для провайдера `N` (или задайте `model` явно).
+- `llm.providers.N.api_key_env` — имя переменной с API-ключом для провайдера `N` (или задайте `api_key` напрямую).
+- `llm.providers.N.base_url_env` — имя переменной с альтернативным базовым URL для провайдера `N` (опционально).
+- `llm.providers.N.temperature` — температура выборки для провайдера `N`; оставьте `0` для детерминированных ответов.
+- `llm.providers.N.max_output_tokens` — максимальное число токенов в ответе провайдера `N`.
 - `batch_size` — количество строк, обрабатываемых за один батч LLM.
 - `cache_path` — путь к файлу SQLite-кэша; по умолчанию создается рядом с YAML-файлом.
 
-> Разместите ключ API в переменной окружения, указанной в `llm.api_key_env` (по умолчанию `OPENAI_API_KEY`).
+> Разместите API-ключи в переменных, указанных в соответствующих блоках провайдеров (например, `llm.providers.1.api_key_env` → `OPENAI_API_KEY_1`). Для резервных профилей добавьте `OPENAI_API_KEY_2`, `OPENAI_API_KEY_3` и т.д.
 > Переменные окружения из `.env` в рабочей директории или рядом с конфигом подхватываются автоматически.
 > `data_start_row` должен указывать на первую строку данных; строка выше содержит заголовки.
 

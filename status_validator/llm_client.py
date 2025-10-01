@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Dict, List
+from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple
 
 from openai import OpenAI
 from openai import APIError
 
-from .config import LLMConfig
+from .config import LLMConfig, LLMProviderConfig
 
 
 LOGGER = logging.getLogger(__name__)
@@ -33,57 +34,144 @@ def _append_system_hints(messages: List[Dict[str, str]], hints: List[str]) -> Li
     return updated
 
 
+@dataclass
+class _ProviderClient:
+    priority: int
+    config: LLMProviderConfig
+    client: OpenAI
+    model_name: str
+    display_name: str
+
+    @property
+    def temperature(self) -> float:
+        return self.config.temperature
+
+    @property
+    def max_output_tokens(self) -> int:
+        return self.config.max_output_tokens
+
+    @property
+    def request_timeout(self) -> int:
+        return self.config.request_timeout
+
+
 class LLMClient:
-    """Wrapper around OpenAI client with JSON enforcement."""
+    """Wrapper around OpenAI client with JSON enforcement and provider fallbacks."""
 
     def __init__(self, conf: LLMConfig) -> None:
-        api_key = conf.api_key or os.environ.get(conf.api_key_env)
-        if not api_key:
-            msg = (
-                "OpenAI API key is required. Provide it in the configuration or set the "
-                f"{conf.api_key_env} environment variable."
-            )
-            raise RuntimeError(msg)
-
-        base_url = conf.base_url or os.environ.get(conf.base_url_env)
-        model_name = conf.model or os.environ.get(conf.model_env)
-        if not model_name:
-            msg = (
-                "OpenAI model identifier is required. Provide it in the configuration or set the "
-                f"{conf.model_env} environment variable."
-            )
-            raise RuntimeError(msg)
-
         self._conf = conf
-        self._model = model_name
-        self._client = OpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            organization=conf.organization,
-        )
+        self._providers: List[_ProviderClient] = []
+        self._last_model_name: str | None = None
+
+        for priority, provider_conf in conf.provider_sequence:
+            provider = self._build_provider(priority, provider_conf)
+            if provider is not None:
+                self._providers.append(provider)
+
+        if not self._providers:
+            msg = (
+                "No valid LLM providers configured. Ensure that API keys and model identifiers "
+                "are provided in the configuration or environment."
+            )
+            raise RuntimeError(msg)
 
     @property
     def model_name(self) -> str:
-        """Return the model identifier configured for this client."""
+        """Return the model identifier used by the most recent call."""
 
-        return self._model
+        if self._last_model_name:
+            return self._last_model_name
+        return self._providers[0].model_name
 
     def generate(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         """Call the chat completion endpoint and return parsed JSON content."""
 
+        last_error_messages: List[Tuple[str, str]] = []
+
+        for provider in self._providers:
+            try:
+                payload = self._generate_with_provider(provider, messages)
+            except RuntimeError as exc:  # pragma: no cover - passthrough for logging
+                LOGGER.warning(
+                    "LLM provider '%s' failed after %s attempts: %s",
+                    provider.display_name,
+                    self._conf.max_retries,
+                    exc,
+                )
+                last_error_messages.append((provider.display_name, str(exc)))
+                continue
+
+            self._last_model_name = provider.model_name
+            return payload
+
+        errors_joined = ", ".join(
+            f"{name}: {message}" for name, message in last_error_messages
+        ) or "no providers produced a usable response"
+        raise RuntimeError(f"All LLM providers failed: {errors_joined}")
+
+    def _build_provider(
+        self,
+        priority: int,
+        provider_conf: LLMProviderConfig,
+    ) -> _ProviderClient | None:
+        display_name = provider_conf.name or f"provider-{priority}"
+
+        api_key = provider_conf.api_key
+        if not api_key and provider_conf.api_key_env:
+            api_key = os.environ.get(provider_conf.api_key_env)
+        if not api_key:
+            LOGGER.warning(
+                "Skipping LLM provider '%s': API key is not configured",
+                display_name,
+            )
+            return None
+
+        model_name = provider_conf.model
+        if not model_name and provider_conf.model_env:
+            model_name = os.environ.get(provider_conf.model_env)
+        if not model_name:
+            LOGGER.warning(
+                "Skipping LLM provider '%s': model identifier is not configured",
+                display_name,
+            )
+            return None
+
+        base_url = provider_conf.base_url
+        if not base_url and provider_conf.base_url_env:
+            base_url = os.environ.get(provider_conf.base_url_env)
+
+        client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            organization=provider_conf.organization,
+        )
+
+        return _ProviderClient(
+            priority=priority,
+            config=provider_conf,
+            client=client,
+            model_name=model_name,
+            display_name=display_name,
+        )
+
+    def _generate_with_provider(
+        self,
+        provider: _ProviderClient,
+        messages: List[Dict[str, str]],
+    ) -> Dict[str, Any]:
         max_attempts = self._conf.max_retries
         current_messages = [msg.copy() for msg in messages]
         last_content: str | None = None
 
         for attempt in range(1, max_attempts + 1):
             try:
-                response = self._client.chat.completions.create(
-                    model=self._model,
+                response = provider.client.chat.completions.create(
+                    model=provider.model_name,
                     messages=current_messages,
-                    temperature=self._conf.temperature,
-                    max_tokens=self._conf.max_output_tokens,
+                    temperature=provider.temperature,
+                    max_tokens=provider.max_output_tokens,
                     response_format={"type": "json_object"},
-                    timeout=self._conf.request_timeout,
+                    timeout=provider.request_timeout,
                 )
             except APIError as exc:  # pragma: no cover - passthrough
                 raise RuntimeError(f"LLM request failed: {exc}") from exc
