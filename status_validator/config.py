@@ -35,6 +35,10 @@ class SheetsConfig(BaseModel):
     )
     target_spreadsheet_id: str = Field(..., description="ID of the spreadsheet for output data")
     target_sheet_name: str = Field(..., description="Tab name in the target spreadsheet")
+    rules_sheet_name: Optional[str] = Field(
+        None,
+        description="Optional tab name in the target spreadsheet used to store validation rules",
+    )
 
     @field_validator("credentials_file")
     @classmethod

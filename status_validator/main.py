@@ -103,6 +103,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Force revalidation for rows whose existing 'Check date' is missing, invalid, or from a prior week"
         ),
     )
+    parser.add_argument(
+        "--rules",
+        action="store_true",
+        help="Write the configured rules text to the rules sheet after validation",
+    )
     return parser.parse_args(argv)
 
 
@@ -642,6 +647,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             LOGGER.info("Dry run enabled; writing results to stdout")
             print(json.dumps(output_rows, ensure_ascii=False, indent=2))
+            if args.rules:
+                LOGGER.info(
+                    "Rules flag requested but dry run enabled; skipping rules sheet update"
+                )
         else:
             if len(results) == 0:
                 if use_identifier_updates:
@@ -660,6 +669,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "Completed writing %s result rows to target sheet",
                     len(results),
                 )
+
+            if args.rules:
+                rules_sheet_name = config.sheets.rules_sheet_name
+                if not rules_sheet_name:
+                    LOGGER.error(
+                        "Flag --rules requires sheets.rules_sheet_name to be set in the configuration"
+                    )
+                    return 1
+                LOGGER.info("Writing rules text to sheet '%s'", rules_sheet_name)
+                sheets_client.write_rules_sheet(rules_sheet_name, config.rules_text)
 
         LOGGER.info("Completed validation for %s rows", len(results))
         return 0

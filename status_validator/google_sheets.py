@@ -194,6 +194,48 @@ class GoogleSheetsClient:
 
         self._execute_with_retry(_batch_update_request, operation="update target rows")
 
+    def write_rules_sheet(self, sheet_name: str, rules_text: str) -> None:
+        """Replace the content of the rules sheet with the provided text."""
+
+        if not sheet_name:
+            msg = "Sheet name must be provided to write rules"
+            raise ValueError(msg)
+
+        lines = rules_text.splitlines()
+        if not lines:
+            lines = [""]
+        payload = {
+            "values": [[line] for line in lines],
+        }
+        target_range = f"{sheet_name}!A1"
+
+        def _clear_request() -> HttpRequest:
+            service = self._service_client()
+            return (
+                service.spreadsheets()
+                .values()
+                .clear(
+                    spreadsheetId=self._conf.target_spreadsheet_id,
+                    range=sheet_name,
+                )
+            )
+
+        def _update_request() -> HttpRequest:
+            service = self._service_client()
+            return (
+                service.spreadsheets()
+                .values()
+                .update(
+                    spreadsheetId=self._conf.target_spreadsheet_id,
+                    range=target_range,
+                    valueInputOption="USER_ENTERED",
+                    body=payload,
+                )
+            )
+
+        self._execute_with_retry(_clear_request, operation="clear rules sheet")
+        self._execute_with_retry(_update_request, operation="write rules sheet")
+
     # Helpers -----------------------------------------------------------------
     def build_row_url(self, row_number: int) -> str:
         """Create a direct Google Sheets URL pointing to a specific row."""

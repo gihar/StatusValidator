@@ -5,6 +5,7 @@ sheets:
   source_sheet_gid: 0
   target_spreadsheet_id: 1111111111111111111111111111111111111111111
   target_sheet_name: Status Review
+  rules_sheet_name: Rules
 columns:
   status: Status
   comment: Comment

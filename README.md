@@ -66,6 +66,7 @@ sheets:
   source_sheet_gid: 123456789  # optional, enables direct row links
   target_spreadsheet_id: 1ZyXwVuTsRqPoNm
   target_sheet_name: Status Review
+  rules_sheet_name: Rules
 columns:
   status: Статус
   comment: Комментарий
@@ -97,6 +98,7 @@ cache_path: ./build/status_cache.sqlite  # optional, defaults next to the config
 - `sheets.source_sheet_gid` — numeric `gid` used to generate direct row links (optional).
 - `sheets.target_spreadsheet_id` — ID of the spreadsheet used for validation results.
 - `sheets.target_sheet_name` — sheet name for the result table.
+- `sheets.rules_sheet_name` — sheet name where the full rules text is written when requested.
 - `columns.status` — column containing the status text.
 - `columns.comment` — column with the explanatory comment.
 - `columns.completion_date` — column with completion dates (optional).
@@ -130,6 +132,7 @@ status-validator --config config.yaml
 - `--verbose` enables debug-level logging.
 - `--force` ignores the cache and revalidates every row.
 - `--checkdate` revalidates rows whose "Check date" is missing, invalid, or older than the current week.
+- `--rules` copies the configured rules text to the dedicated sheet after validation.
 
 ### Remote Deployment
 1. Provision Python 3.10+ and gather credentials (service-account JSON and `config.yaml`).
@@ -225,6 +228,7 @@ sheets:
   source_sheet_gid: 123456789  # optional, enables direct row links
   target_spreadsheet_id: 1ZyXwVuTsRqPoNm
   target_sheet_name: Status Review
+  rules_sheet_name: Rules
 columns:
   status: Статус
   comment: Комментарий
@@ -256,6 +260,7 @@ cache_path: ./build/status_cache.sqlite  # optional, defaults next to the config
 - `sheets.source_sheet_gid` — числовой `gid`, позволяющий формировать прямые ссылки на строки (опционально).
 - `sheets.target_spreadsheet_id` — идентификатор таблицы с результатами проверки.
 - `sheets.target_sheet_name` — лист, куда записываются результаты.
+- `sheets.rules_sheet_name` — лист, куда при необходимости выгружается полный текст правил.
 - `columns.status` — колонка со статусом.
 - `columns.comment` — колонка с пояснительным комментарием.
 - `columns.completion_date` — колонка с датой завершения (опционально).
@@ -289,6 +294,7 @@ status-validator --config config.yaml
 - `--verbose` — включает детализированный лог.
 - `--force` — игнорирует кэш и повторно валидирует каждую строку.
 - `--checkdate` — принудительно проверяет строки с пустой, некорректной или устаревшей датой в колонке "Check date".
+- `--rules` — после проверки копирует текст правил на отдельный лист в таблице результатов.
 
 ### Удаленное развертывание
 1. Установите Python 3.10+ и подготовьте учетные данные (JSON сервисного аккаунта и `config.yaml`).
