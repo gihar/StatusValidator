@@ -13,6 +13,7 @@ from .cache import CacheStore, compute_comment_hash
 from .config import load_config
 from .google_sheets import GoogleSheetsClient
 from .llm_client import LLMClient
+from .parallel import validate_batch_parallel
 from .pipeline import build_entries, build_result_from_payload, results_to_rows, validate_entry
 
 def _load_env_files(config_path: Path) -> None:
@@ -283,7 +284,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         for start in range(0, len(entries), config.batch_size):
             batch = entries[start : start + config.batch_size]
-            LOGGER.info("Validating rows %s-%s", batch[0].row_number, batch[-1].row_number)
+            LOGGER.info("Processing rows %s-%s", batch[0].row_number, batch[-1].row_number)
+            
+            # Determine whether to use parallel processing
+            max_workers = getattr(config.llm, 'max_workers', 1)
+            
+            # First pass: filter entries and check cache
+            entries_to_validate = []  # Entries that need LLM validation
+            cached_results = []  # Entries with cached results
+            
             for entry in batch:
                 LOGGER.debug("Validating row %s", entry.row_number)
                 normalized_identifier = _normalize_identifier(entry.identifier)
@@ -342,45 +351,82 @@ def main(argv: Sequence[str] | None = None) -> int:
                         status_text=entry.status_text,
                         comment_hash=comment_hash,
                     )
+                
                 if cached_payload is not None:
-                    LOGGER.debug(
-                        "Using cached validation for row %s", entry.row_number
-                    )
-                    result = build_result_from_payload(
-                        entry,
-                        cached_payload,
-                        config,
-                        sheets_client,
-                    )
+                    # Entry has cached result
+                    LOGGER.debug("Using cached validation for row %s", entry.row_number)
+                    result = build_result_from_payload(entry, cached_payload, config, sheets_client)
+                    cached_results.append((entry, result, comment_hash, normalized_identifier, True))
                 else:
-                    try:
-                        result = validate_entry(entry, config, sheets_client, llm_client)
-                    except Exception:  # pragma: no cover - defensive logging path
-                        LOGGER.exception("Validation failed for row %s; skipping", entry.row_number)
-                        failed_entries.append(entry)
-                        continue
-                    cache_store.store_payload(
-                        source_id=config.sheets.source_spreadsheet_id,
-                        sheet_name=config.sheets.source_sheet_name,
-                        row_number=entry.row_number,
-                        status_text=entry.status_text,
-                        comment_hash=comment_hash,
-                        payload=result.raw_response,
+                    # Entry needs validation
+                    entries_to_validate.append((entry, comment_hash, normalized_identifier))
+            
+            # Second pass: validate entries in parallel or sequentially
+            validated_results = []
+            if entries_to_validate:
+                entries_only = [item[0] for item in entries_to_validate]
+                
+                if max_workers > 1:
+                    LOGGER.info("Validating %d rows in parallel with %d workers", len(entries_only), max_workers)
+                    successful, failed = validate_batch_parallel(
+                        entries_only, config, sheets_client, llm_client, max_workers
                     )
-                if cached_payload is not None:
+                    
+                    # Process successful validations
+                    for entry, result in successful:
+                        # Find corresponding comment_hash and normalized_identifier
+                        for e, ch, ni in entries_to_validate:
+                            if e.row_number == entry.row_number:
+                                # Store in cache
+                                cache_store.store_payload(
+                                    source_id=config.sheets.source_spreadsheet_id,
+                                    sheet_name=config.sheets.source_sheet_name,
+                                    row_number=entry.row_number,
+                                    status_text=entry.status_text,
+                                    comment_hash=ch,
+                                    payload=result.raw_response,
+                                )
+                                validated_results.append((entry, result, ch, ni, False))
+                                break
+                    
+                    # Add failed entries to failed_entries list
+                    failed_entries.extend(failed)
+                else:
+                    # Sequential processing (original logic)
+                    LOGGER.info("Validating %d rows sequentially", len(entries_only))
+                    for entry, comment_hash, normalized_identifier in entries_to_validate:
+                        try:
+                            result = validate_entry(entry, config, sheets_client, llm_client)
+                            cache_store.store_payload(
+                                source_id=config.sheets.source_spreadsheet_id,
+                                sheet_name=config.sheets.source_sheet_name,
+                                row_number=entry.row_number,
+                                status_text=entry.status_text,
+                                comment_hash=comment_hash,
+                                payload=result.raw_response,
+                            )
+                            validated_results.append((entry, result, comment_hash, normalized_identifier, False))
+                        except Exception:
+                            LOGGER.exception("Validation failed for row %s; skipping", entry.row_number)
+                            failed_entries.append(entry)
+            
+            # Third pass: process all results (cached + validated) in original order
+            all_results = cached_results + validated_results
+            all_results.sort(key=lambda x: x[0].row_number)
+            
+            for entry, result, comment_hash, normalized_identifier, is_cached in all_results:
+                if is_cached:
                     entry_model_value = (
                         existing_model_by_identifier.get(normalized_identifier)
                         if normalized_identifier
                         else None
                     )
                     if entry_model_value is None:
-                        entry_model_value = existing_model_by_row_number.get(
-                            entry.row_number
-                        )
+                        entry_model_value = existing_model_by_row_number.get(entry.row_number)
                 else:
                     entry_model_value = llm_client.model_name
 
-                entry_check_date = None if cached_payload is not None else check_date
+                entry_check_date = None if is_cached else check_date
                 processed_entries.append(entry)
                 processed_check_dates.append(entry_check_date)
                 processed_model_names.append(entry_model_value)

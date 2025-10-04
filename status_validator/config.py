@@ -113,6 +113,12 @@ class LLMConfig(BaseModel):
         ge=1,
         description="Number of attempts per provider before switching to the next one",
     )
+    max_workers: int = Field(
+        1,
+        ge=1,
+        le=20,
+        description="Number of parallel threads for LLM requests (1 = sequential, 5 recommended)",
+    )
     providers: dict[int, LLMProviderConfig] = Field(
         ...,
         description="Mapping of priority -> provider configuration",

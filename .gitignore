@@ -41,3 +41,4 @@ config.yaml
 .cache/
 *.sqlite
 
+venv/

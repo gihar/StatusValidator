@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import time
 from hashlib import sha256
 from pathlib import Path
@@ -23,9 +24,11 @@ class CacheStore:
 
     def __init__(self, path: Path) -> None:
         self._path = path
+        self._lock = threading.Lock()  # Thread-safe access to SQLite
         if not path.parent.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(path))
+        # check_same_thread=False allows connection use from multiple threads
+        self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._ensure_schema()
 
@@ -47,7 +50,8 @@ class CacheStore:
             )
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:  # Thread-safe close
+            self._conn.close()
 
     def get_payload(
         self,
@@ -60,19 +64,21 @@ class CacheStore:
     ) -> Optional[Dict[str, Any]]:
         """Fetch cached payload if status and comment hash match."""
 
-        cursor = self._conn.execute(
-            """
-            SELECT payload_json
-            FROM llm_cache
-            WHERE source_id = ?
-              AND sheet_name = ?
-              AND row_number = ?
-              AND status_text = ?
-              AND comment_hash = ?
-            """,
-            (source_id, sheet_name, row_number, status_text, comment_hash),
-        )
-        row = cursor.fetchone()
+        with self._lock:  # Thread-safe database access
+            cursor = self._conn.execute(
+                """
+                SELECT payload_json
+                FROM llm_cache
+                WHERE source_id = ?
+                  AND sheet_name = ?
+                  AND row_number = ?
+                  AND status_text = ?
+                  AND comment_hash = ?
+                """,
+                (source_id, sheet_name, row_number, status_text, comment_hash),
+            )
+            row = cursor.fetchone()
+        
         if not row:
             return None
         try:
@@ -98,32 +104,34 @@ class CacheStore:
 
         payload_json = json.dumps(payload, ensure_ascii=False)
         timestamp = time.time()
-        with self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO llm_cache (
-                    source_id,
-                    sheet_name,
-                    row_number,
-                    status_text,
-                    comment_hash,
-                    payload_json,
-                    updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(source_id, sheet_name, row_number)
-                DO UPDATE SET
-                    status_text = excluded.status_text,
-                    comment_hash = excluded.comment_hash,
-                    payload_json = excluded.payload_json,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    source_id,
-                    sheet_name,
-                    row_number,
-                    status_text,
-                    comment_hash,
-                    payload_json,
-                    timestamp,
-                ),
-            )
+        
+        with self._lock:  # Thread-safe database access
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO llm_cache (
+                        source_id,
+                        sheet_name,
+                        row_number,
+                        status_text,
+                        comment_hash,
+                        payload_json,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(source_id, sheet_name, row_number)
+                    DO UPDATE SET
+                        status_text = excluded.status_text,
+                        comment_hash = excluded.comment_hash,
+                        payload_json = excluded.payload_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        source_id,
+                        sheet_name,
+                        row_number,
+                        status_text,
+                        comment_hash,
+                        payload_json,
+                        timestamp,
+                    ),
+                )

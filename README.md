@@ -1,73 +1,58 @@
 # Status Validator
 
-Python tool that reads project status updates from Google Sheets, validates them with an LLM, and writes structured review results back to a separate sheet.
+Python utility that reads project status updates from Google Sheets, evaluates them with an LLM, and writes structured feedback back to a results sheet. The tool ships with caching, incremental updates, and optional parallel execution.
 
-## Table of Contents
-- [English Version](#english-version)
-  - [Overview](#overview)
-  - [Features](#features)
-  - [Requirements](#requirements)
-  - [Installation](#installation)
-  - [Configuration](#configuration)
-  - [Usage](#usage)
-  - [Command-line Flags](#command-line-flags)
-  - [Remote Deployment](#remote-deployment)
-  - [Scheduled Runs](#scheduled-runs)
-    - [Cron](#cron)
-    - [systemd timer](#systemd-timer)
-  - [Output](#output)
-  - [Local Validation](#local-validation)
-- [Русская версия](#русская-версия)
-  - [Краткое описание](#краткое-описание)
-  - [Возможности](#возможности)
-  - [Требования](#требования)
-  - [Установка](#установка)
-  - [Конфигурация](#конфигурация)
-  - [Запуск](#запуск)
-  - [Опции командной строки](#опции-командной-строки)
-  - [Удаленное развертывание](#удаленное-развертывание)
-  - [Планирование запуска](#планирование-запуска)
-    - [Cron](#cron-1)
-    - [systemd timer](#systemd-timer-1)
-  - [Результаты](#результаты)
-  - [Локальная проверка](#локальная-проверка)
+- 🇬🇧 English (this document)
+- 🇷🇺 [Русская версия](#-русская-версия)
 
-## English Version
+## Overview
+Status Validator pulls rows from a configured Google Sheet, prepares an optimized JSON-only prompt, and sends it to an OpenAI-compatible model. Each response is converted into a structured record that can either overwrite or append to the target sheet. Cached payloads, incremental updates, and retry logic keep runs fast and predictable.
 
-### Overview
-Status Validator automates the review of project status updates: it pulls rows from a Google Sheet, evaluates them with an LLM, and writes structured feedback to a results sheet.
+## Key Capabilities
+- Reads source data, rules, and identifiers from Google Sheets using a service account.
+- Builds JSON-only prompts, enforces retries, and supports multiple LLM providers with priority fallback.
+- Persists LLM responses in a SQLite cache; skips revalidation unless the status text or comment changes.
+- Updates existing result rows by project identifier or appends new rows when no identifier is present.
+- Supports prompt-cache-friendly requests (`prompt_cache_key`) and optional parallel validation via `ThreadPoolExecutor`.
+- Emits detailed logging, including cache hits, prompt caching metrics, and rate-limit retries.
 
-### Features
-- Loads status text and comments from a configurable Google Sheet.
-- Sends each row to an LLM together with custom rules and allowed statuses.
-- Captures model feedback, including rewrite suggestions.
-- Publishes findings to a target sheet with hyperlinks to the original rows.
-- Reuses cached LLM answers while status and comment remain unchanged.
-- **Supports OpenAI automatic prompt caching** for 50% cost reduction on supported models (GPT-4o, GPT-4o-mini).
-
-### Requirements
+## Requirements
 - Python 3.10 or newer.
-- Google service account with access to the source and target spreadsheets.
-- OpenAI-compatible API key with access to the chosen model.
+- Google Cloud service-account JSON with access to both the source and target spreadsheets.
+- OpenAI-compatible API key (e.g., OpenAI, OpenRouter, Groq) with access to the selected model.
 
-### Installation
+## Quick Start
+1. Clone the repository and create a virtual environment:
+   ```bash
+   git clone https://github.com/gihar/StatusValidator.git
+   cd StatusValidator
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+2. Install the package (editable install recommended for local changes):
+   ```bash
+   pip install -e .
+   ```
+   For development extras run `pip install -e .[dev]`.
+3. Copy `config.example.yaml` to `config.yaml` and adjust it to match your spreadsheets.
+4. Place service-account credentials and LLM API keys in the paths and environment variables referenced by the config. `.env` files in the project root or next to `config.yaml` are loaded automatically.
+5. Run a dry test:
+   ```bash
+   status-validator --config config.yaml --dry-run --limit 5 --verbose
+   ```
+   Remove `--dry-run` once the output looks correct.
 
-```bash
-pip install -e .
-```
-
-### Configuration
-Create a YAML file (see `config.example.yaml`) that describes sheets, columns, validation rules, and LLM settings. Example:
-
+## Configuration Reference
+Example configuration:
 ```yaml
 sheets:
-  credentials_file: /path/to/service-account.json
+  credentials_file: ./service-account.json
   source_spreadsheet_id: 1AbCdEfGhIjKlMn
   source_sheet_name: Statuses
-  source_sheet_gid: 123456789  # optional, enables direct row links
+  source_sheet_gid: 123456789   # optional, allows direct row links
   target_spreadsheet_id: 1ZyXwVuTsRqPoNm
   target_sheet_name: Status Review
-  rules_sheet_name: Rules
+  rules_sheet_name: Rules       # optional destination for --rules flag
 columns:
   status: Статус
   comment: Комментарий
@@ -79,198 +64,171 @@ allowed_statuses:
   - Есть риски
   - Отстает
 rules_text: |
-  (Paste the full validation rulebook here. It will be passed to the LLM verbatim.)
-header_row: 1  # row with column titles
-data_start_row: 2  # first data row (1-based) below the header
+  Полный свод правил, передаваемый LLM без изменений.
+header_row: 1
+data_start_row: 2
 llm:
   max_retries: 3
+  max_workers: 5
   providers:
     1:
-      name: primary  # highest priority
+      name: primary
       model_env: OPENAI_MODEL_1
       api_key_env: OPENAI_API_KEY_1
-      base_url_env: OPENAI_BASE_URL_1  # optional, overrides API host via env variable
+      base_url_env: OPENAI_BASE_URL_1
       temperature: 0
       max_output_tokens: 1024
     2:
       name: fallback-openrouter
       model_env: OPENAI_MODEL_2
       api_key_env: OPENAI_API_KEY_2
-      base_url_env: OPENAI_BASE_URL_2
-      temperature: 0
-      max_output_tokens: 1024
 batch_size: 10
-cache_path: ./build/status_cache.sqlite  # optional, defaults next to the config file
+cache_path: ./build/status_validator_cache.sqlite
 ```
 
-**Parameter reference**
-- `sheets.credentials_file` — path to the Google service-account JSON key.
-- `sheets.source_spreadsheet_id` — ID of the spreadsheet containing source statuses (from the URL).
-- `sheets.source_sheet_name` — sheet name with source data.
-- `sheets.source_sheet_gid` — numeric `gid` used to generate direct row links (optional).
-- `sheets.target_spreadsheet_id` — ID of the spreadsheet used for validation results.
-- `sheets.target_sheet_name` — sheet name for the result table.
-- `sheets.rules_sheet_name` — sheet name where the full rules text is written when requested.
-- `columns.status` — column containing the status text.
-- `columns.comment` — column with the explanatory comment.
-- `columns.completion_date` — column with completion dates (optional).
-- `columns.identifier` — column containing a unique project name; enables updates by identifier.
-- `columns.project_manager` — column with the responsible manager’s name (optional).
-- `allowed_statuses` — list of valid status values; anything else is treated as invalid.
-- `rules_text` — full validation rulebook supplied verbatim to the LLM.
-- `header_row` — row number (1-based) containing column headers.
-- `data_start_row` — first data row number (1-based) below the header.
-- `llm.max_retries` — number of retries per provider before failing over to the next one.
-- `llm.providers` — mapping of numeric priorities to provider profiles; lower numbers run first.
-- `llm.providers.N.model_env` — env var that stores the model identifier for provider `N` (or specify `model` directly).
-- `llm.providers.N.api_key_env` — env var that stores the API key for provider `N` (or specify `api_key` directly).
-- `llm.providers.N.base_url_env` — env var with a custom API host for provider `N` (optional).
-- `llm.providers.N.temperature` — sampling temperature for provider `N`; keep `0` for deterministic outputs.
-- `llm.providers.N.max_output_tokens` — maximum number of tokens returned by provider `N`.
-- `batch_size` — number of rows processed per LLM batch.
-- `cache_path` — path to the SQLite cache; defaults to a file next to the YAML config.
+Key fields:
 
-> Place each API key in the environment variable declared in the corresponding provider block (for example `llm.providers.1.api_key_env` → `OPENAI_API_KEY_1`). Provide `OPENAI_API_KEY_2`, `OPENAI_API_KEY_3`, ... for fallback providers as needed.
-> Environment variables from a `.env` file located in the working directory or next to the config file are loaded automatically.
-> Set `data_start_row` to the first data row number (1-based); the row above must contain the headers.
+| Key | Purpose |
+| --- | --- |
+| `sheets.credentials_file` | Path to the Google service-account JSON file. |
+| `sheets.source_spreadsheet_id` / `source_sheet_name` | Identify the sheet that stores raw statuses. |
+| `sheets.target_spreadsheet_id` / `target_sheet_name` | Destination for validation results. |
+| `sheets.source_sheet_gid` | Enables direct row links in the "Row Number" column (optional). |
+| `sheets.rules_sheet_name` | Target tab that receives `rules_text` when `--rules` is used. |
+| `columns.*` | Column headers exactly as they appear in the source sheet. Optional fields can be left empty. |
+| `allowed_statuses` | Restricts valid status values; anything outside the list becomes a validation error. |
+| `rules_text` | Multi-line rulebook passed verbatim to the LLM and used to compute the prompt cache key. |
+| `header_row` / `data_start_row` | 1-based positions of the header row and the first data row. `data_start_row` must be greater than `header_row`. |
+| `llm.max_retries` | Attempts per provider before falling back to the next one. |
+| `llm.max_workers` | Number of parallel threads for validation (1 = sequential). |
+| `llm.providers` | Priority-ordered providers; keys must be consecutive integers starting from 1. Each provider can read credentials and model IDs from env vars. |
+| `batch_size` | Chunk size for processing entries. Smaller batches reduce memory usage; larger batches improve cache locality. |
+| `cache_path` | Location of the SQLite cache file. Defaults to `status_validator_cache.sqlite` next to the config when omitted. |
 
-### Usage
-
+## Running the Validator
 ```bash
-status-validator --config config.yaml
+status-validator --config /path/to/config.yaml
 ```
 
-### Command-line Flags
-- `--dry-run` prints the result table to stdout instead of writing to Google Sheets.
-- `--limit N` processes only the first `N` rows (useful for testing).
-- `--verbose` enables debug-level logging.
-- `--force` ignores the cache and revalidates every row.
-- `--checkdate` revalidates rows whose "Check date" is missing, invalid, or older than the current week.
-- `--rules` copies the configured rules text to the dedicated sheet after validation.
+The CLI loads `.env` from the current directory first and then from the directory that contains the config file. Important flags:
 
-### Remote Deployment
-1. Provision Python 3.10+ and gather credentials (service-account JSON and `config.yaml`).
-2. Clone the repository on the target host:
+| Flag | Description |
+| --- | --- |
+| `--dry-run` | Skip Google Sheets writes; dump the resulting table to stdout as JSON. |
+| `--limit N` | Process only the first `N` data rows. Useful for smoke tests. |
+| `--verbose` | Enable debug logging (prompt caching metrics, retries, cache hits). |
+| `--force` | Ignore cached payloads and revalidate every row. |
+| `--checkdate` | Revalidate rows whose "Check date" column is empty, invalid, or from a previous week. |
+| `--rules` | After validation, write `rules_text` into `sheets.rules_sheet_name`. |
 
-   ```bash
-   git clone https://github.com/gihar/StatusValidator.git
-   cd StatusValidator
-   ```
+## Output Schema
+Each processed entry produces:
+- `Row Number` with a hyperlink to the source row when `source_sheet_gid` is configured.
+- Either `Project name` (hyperlinked identifier) or `Source URL`, plus `Project manager` when the column exists.
+- `Status Value`, `Completion Date`, and `Comment` copied from the source sheet.
+- `Is Valid` (`YES`/`NO`), `Issues` (markdown-style bullets), and `Rewrite Suggestion` generated by the LLM.
+- `Raw LLM JSON` serialized with indentation for audit purposes.
+- `Check date` timestamp and `Model` name showing when and by which model the row was processed.
 
-3. Create a virtual environment and install dependencies:
+## Prompt Caching and Parallel Execution
+- **SQLite cache:** `cache.CacheStore` stores the full LLM JSON response keyed by row number, status text, and comment hash. Reuse is automatic unless `--force` or `--checkdate` says otherwise.
+- **OpenAI automatic prompt caching:** `prompt_cache_key` is passed for every request. When supported (GPT-4o, GPT-4o-mini, o1 models) the API returns cache hit statistics in the log (`Prompt cache hit: 2048/2500 tokens (81.9%)`).
+- **Parallel workers:** Set `llm.max_workers > 1` to validate rows concurrently. Rate-limit errors trigger exponential backoff and retry inside `parallel.validate_batch_parallel`.
 
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install --upgrade pip
-   pip install -e .
-   ```
+More background material is available in `PROMPT_CACHING.md` and `docs/multithreading/`.
 
-4. Configure environment variables (for example `OPENAI_API_KEY`) in a `.env` file and ensure `config.yaml` points to the deployed paths.
-5. Perform a dry run to confirm connectivity:
+## Operational Tips
+- `--checkdate` compares the stored "Check date" to the current ISO week. Stale or missing dates trigger revalidation while fresh rows reuse the cache.
+- When `columns.identifier` is populated, the validator updates existing rows by matching the identifier, preserving results order and avoiding duplicates.
+- Use `batch_size` to balance throughput and API quotas. Ten-row batches work well when prompt caching is active.
+- Set `llm.providers.N.base_url_env` and `...api_key_env` to integrate with non-OpenAI compatible endpoints such as OpenRouter or Groq.
+- The rules sheet update (`--rules`) clears the destination tab before writing one rule per row.
 
-   ```bash
-   venv/bin/status-validator --config /path/to/config.yaml --dry-run --limit 5
-   ```
+## Automation
+Create a wrapper script that activates the virtual environment, loads environment variables, and calls the CLI. Schedule it via cron or `systemd`:
 
-### Scheduled Runs
-Create `run_status_validator.sh` to activate the virtual environment, load `.env`, and launch the CLI. Then pick a scheduler.
-
-#### Cron
-
+Cron example:
 ```
 0 7 * * 1-5 /home/user/StatusValidator/run_status_validator.sh
 ```
 
-#### systemd timer
-Create `/etc/systemd/system/status-validator.service` and `/etc/systemd/system/status-validator.timer`, then run:
-
-```bash
-sudo systemctl enable --now status-validator.timer
+`systemd` timer outline:
 ```
+# /etc/systemd/system/status-validator.service
+[Service]
+ExecStart=/home/user/StatusValidator/run_status_validator.sh
 
-### Output
-Each validated row produces the following columns:
-- Row number and direct link back to the original entry.
-- Project name (from `columns.identifier`) rendered as a hyperlink when available.
-- Original status, comment, and completion date.
-- Validation flag (`YES`/`NO`).
-- Bullet list with LLM remarks.
-- Rewrite suggestion aligned with the rulebook.
-- Raw LLM JSON for traceability.
-- "Check date" timestamp plus the LLM model identifier.
-
-### Prompt Caching
-
-This project supports **OpenAI automatic prompt caching** for significant cost savings:
-
-- **Supported models:** GPT-4o, GPT-4o-mini, o1-preview, o1-mini
-- **Cost reduction:** ~50% on input tokens (cached)
-- **Latency improvement:** ~20-30% faster responses
-- **No configuration needed:** Works automatically when using supported models
-
-**Recommended configuration:**
-```yaml
-llm:
-  providers:
-    1:
-      model: gpt-4o              # Enables automatic caching
-      # or
-      model: gpt-4o-mini         # Cheaper with caching support
+# /etc/systemd/system/status-validator.timer
+[Timer]
+OnCalendar=Mon..Fri 07:00
+Persistent=true
 ```
+Then run `sudo systemctl enable --now status-validator.timer`.
 
-**Monitoring cache usage:**
-```bash
-status-validator --config config.yaml --verbose
-# Look for: "Prompt cache hit: 2048/2500 tokens (81.9%)"
-```
+## Local Development
+- Run `pytest` to execute unit tests (install extras with `pip install -e .[dev]`).
+- `python -m compileall status_validator` performs a lightweight syntax check for all modules.
+- The project uses standard logging; enable `--verbose` for detailed traces during development.
 
-For detailed information, see [PROMPT_CACHING.md](PROMPT_CACHING.md).
+## Additional Documentation
+- `PROMPT_CACHING.md` — deep dive into automatic prompt caching and `prompt_cache_key`.
+- `PROMPT_CACHE_KEY.md` — how the cache key is generated from `rules_text` and allowed statuses.
+- `docs/multithreading/README.md` — architecture notes, benchmarks, and FAQ for parallel execution.
+- `MIGRATION_TO_CACHING.md` — migration notes for enabling prompt caching in existing deployments.
 
-### Local Validation
+---
 
-```bash
-python -m compileall status_validator
-```
+## 🇷🇺 Русская версия
+Status Validator загружает статусы проектов из Google Sheets, проверяет их с помощью LLM и записывает структурированный результат на отдельный лист. Ниже приведена полная инструкция, эквивалентная английскому разделу.
 
-Add automated tests under `tests/` and run `pytest` as needed.
+### Обзор
+Программа считывает строки из настроенной Google-таблицы, формирует оптимизированный промпт в формате JSON-only и отправляет его в модель, совместимую с OpenAI. Ответ превращается в структурированные данные, которые можно перезаписать в лист результатов или добавить как новые строки. Кеширование, инкрементальные обновления и логика повторных попыток делают запуск предсказуемым и быстрым.
 
-## Русская версия
-
-### Краткое описание
-Status Validator автоматизирует проверку статусов проектов: загружает строки из Google Sheets, валидирует их с помощью LLM и записывает структурированную обратную связь на лист с результатами.
-
-### Возможности
-- Загружает статусы и комментарии из настраиваемой Google-таблицы.
-- Передает каждую строку в LLM вместе с правилами и допустимыми статусами.
-- Фиксирует замечания модели, включая предложения по переписыванию текста.
-- Публикует результаты на целевом листе с гиперссылками на исходные строки.
-- Переиспользует кэшированные ответы LLM, пока статус и комментарий не меняются.
-- **Поддерживает автоматическое prompt caching от OpenAI** для снижения стоимости на 50% (GPT-4o, GPT-4o-mini).
+### Ключевые возможности
+- Чтение исходных данных, правил и идентификаторов через сервисный аккаунт Google.
+- Формирование JSON-only промптов, система повторных попыток и приоритетный список LLM-провайдеров.
+- SQLite-кэш с привязкой к номеру строки, тексту статуса и хэшу комментария — повторная проверка выполняется только при изменении данных.
+- Обновление строк по идентификатору проекта либо добавление новых записей при его отсутствии.
+- Поддержка `prompt_cache_key` и многопоточной валидации через `ThreadPoolExecutor`.
+- Детализированные логи: попадания в кеш, статистика prompt caching и обработка ограничений скорости.
 
 ### Требования
-- Python 3.10 или новее.
-- Сервисный аккаунт Google с доступом к исходной и целевой таблицам.
-- API-ключ, совместимый с OpenAI, с доступом к выбранной модели.
+- Python версии 3.10 и выше.
+- JSON-ключ сервисного аккаунта Google с доступом к исходной и целевой таблицам.
+- API-ключ для сервиса, совместимого с OpenAI (OpenAI, OpenRouter, Groq и т.д.), с доступом к выбранной модели.
 
-### Установка
+### Быстрый старт
+1. Клонируйте репозиторий и создайте виртуальное окружение:
+   ```bash
+   git clone https://github.com/gihar/StatusValidator.git
+   cd StatusValidator
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+2. Установите пакет (для локальных правок рекомендуется editable-режим):
+   ```bash
+   pip install -e .
+   ```
+   Для разработки и тестов используйте `pip install -e .[dev]`.
+3. Скопируйте `config.example.yaml` в `config.yaml` и настройте идентификаторы таблиц и колонок.
+4. Разместите файл сервисного аккаунта и API-ключи в путях и переменных окружения, указанных в конфигурации. Файлы `.env` в корне проекта и рядом с `config.yaml` подхватываются автоматически.
+5. Выполните пробный запуск:
+   ```bash
+   status-validator --config config.yaml --dry-run --limit 5 --verbose
+   ```
+   Уберите `--dry-run`, когда убедитесь, что результат корректен.
 
-```bash
-pip install -e .
-```
-
-### Конфигурация
-Создайте YAML-файл (см. `config.example.yaml`), в котором описаны таблицы, колонки, правила проверки и настройки LLM. Пример:
-
+### Справочник по конфигурации
+Пример настроек:
 ```yaml
 sheets:
-  credentials_file: /path/to/service-account.json
+  credentials_file: ./service-account.json
   source_spreadsheet_id: 1AbCdEfGhIjKlMn
   source_sheet_name: Statuses
-  source_sheet_gid: 123456789  # optional, enables direct row links
+  source_sheet_gid: 123456789   # необязательно, включает прямые ссылки на строки
   target_spreadsheet_id: 1ZyXwVuTsRqPoNm
   target_sheet_name: Status Review
-  rules_sheet_name: Rules
+  rules_sheet_name: Rules       # необязательно, используется флагом --rules
 columns:
   status: Статус
   comment: Комментарий
@@ -282,158 +240,114 @@ allowed_statuses:
   - Есть риски
   - Отстает
 rules_text: |
-  (Paste the full validation rulebook here. It will be passed to the LLM verbatim.)
-header_row: 1  # row with column titles
-data_start_row: 2  # first data row (1-based) below the header
+  Полный свод правил, передаваемый LLM без изменений.
+header_row: 1
+data_start_row: 2
 llm:
   max_retries: 3
+  max_workers: 5
   providers:
     1:
-      name: primary  # наивысший приоритет
+      name: primary
       model_env: OPENAI_MODEL_1
       api_key_env: OPENAI_API_KEY_1
-      base_url_env: OPENAI_BASE_URL_1  # опционально, для смены хоста API
+      base_url_env: OPENAI_BASE_URL_1
       temperature: 0
       max_output_tokens: 1024
     2:
       name: fallback-openrouter
       model_env: OPENAI_MODEL_2
       api_key_env: OPENAI_API_KEY_2
-      base_url_env: OPENAI_BASE_URL_2
-      temperature: 0
-      max_output_tokens: 1024
 batch_size: 10
-cache_path: ./build/status_cache.sqlite  # optional, defaults next to the config file
+cache_path: ./build/status_validator_cache.sqlite
 ```
 
-**Справочник параметров**
-- `sheets.credentials_file` — путь к JSON-ключу сервисного аккаунта Google.
-- `sheets.source_spreadsheet_id` — идентификатор таблицы со статусами (из URL).
-- `sheets.source_sheet_name` — лист с исходными данными.
-- `sheets.source_sheet_gid` — числовой `gid`, позволяющий формировать прямые ссылки на строки (опционально).
-- `sheets.target_spreadsheet_id` — идентификатор таблицы с результатами проверки.
-- `sheets.target_sheet_name` — лист, куда записываются результаты.
-- `sheets.rules_sheet_name` — лист, куда при необходимости выгружается полный текст правил.
-- `columns.status` — колонка со статусом.
-- `columns.comment` — колонка с пояснительным комментарием.
-- `columns.completion_date` — колонка с датой завершения (опционально).
-- `columns.identifier` — колонка с уникальным названием проекта; позволяет обновлять строки по идентификатору.
-- `columns.project_manager` — колонка с именем ответственного менеджера (опционально).
-- `allowed_statuses` — список допустимых значений статуса; другие значения считаются некорректными.
-- `rules_text` — полный набор правил проверки, передаваемый LLM без изменений.
-- `header_row` — номер строки (с единицы), в которой находятся заголовки.
-- `data_start_row` — номер первой строки с данными под заголовками (с единицы).
-- `llm.max_retries` — количество попыток на один провайдер перед переключением к следующему.
-- `llm.providers` — отображение «приоритет → настройки провайдера»; сначала используется профиль с меньшим номером.
-- `llm.providers.N.model_env` — имя переменной окружения с идентификатором модели для провайдера `N` (или задайте `model` явно).
-- `llm.providers.N.api_key_env` — имя переменной с API-ключом для провайдера `N` (или задайте `api_key` напрямую).
-- `llm.providers.N.base_url_env` — имя переменной с альтернативным базовым URL для провайдера `N` (опционально).
-- `llm.providers.N.temperature` — температура выборки для провайдера `N`; оставьте `0` для детерминированных ответов.
-- `llm.providers.N.max_output_tokens` — максимальное число токенов в ответе провайдера `N`.
-- `batch_size` — количество строк, обрабатываемых за один батч LLM.
-- `cache_path` — путь к файлу SQLite-кэша; по умолчанию создается рядом с YAML-файлом.
+Основные поля:
 
-> Разместите API-ключи в переменных, указанных в соответствующих блоках провайдеров (например, `llm.providers.1.api_key_env` → `OPENAI_API_KEY_1`). Для резервных профилей добавьте `OPENAI_API_KEY_2`, `OPENAI_API_KEY_3` и т.д.
-> Переменные окружения из `.env` в рабочей директории или рядом с конфигом подхватываются автоматически.
-> `data_start_row` должен указывать на первую строку данных; строка выше содержит заголовки.
+| Поле | Назначение |
+| --- | --- |
+| `sheets.credentials_file` | Путь к JSON сервисного аккаунта Google. |
+| `sheets.source_spreadsheet_id` / `source_sheet_name` | Указывают таблицу и лист с исходными статусами. |
+| `sheets.target_spreadsheet_id` / `target_sheet_name` | Лист-приемник результатов проверки. |
+| `sheets.source_sheet_gid` | Позволяет формировать прямые ссылки на строки (опционально). |
+| `sheets.rules_sheet_name` | Лист, в который записываются правила при запуске с `--rules`. |
+| `columns.*` | Названия колонок, как в исходной таблице; необязательные поля можно опустить. |
+| `allowed_statuses` | Список допустимых значений статуса; иные значения считаются ошибкой. |
+| `rules_text` | Полный текст правил, передается LLM без изменений и участвует в расчете ключа кеша. |
+| `header_row` / `data_start_row` | Номера строк (с единицы) для заголовка и первой строки данных; `data_start_row` должен быть больше `header_row`. |
+| `llm.max_retries` | Количество попыток для провайдера перед переходом к следующему. |
+| `llm.max_workers` | Число параллельных потоков (1 = последовательная обработка). |
+| `llm.providers` | Провайдеры по приоритетам; ключи — последовательные числа от 1. Параметры можно считывать из переменных окружения. |
+| `batch_size` | Размер батча для обработки; большие батчи улучшают локальность кеша. |
+| `cache_path` | Путь к файлу SQLite-кеша. По умолчанию создается рядом с конфигом. |
 
-### Запуск
-
+### Запуск валидатора
 ```bash
-status-validator --config config.yaml
+status-validator --config /path/to/config.yaml
 ```
 
-### Опции командной строки
-- `--dry-run` — выводит таблицу результатов в stdout вместо записи в Google Sheets.
-- `--limit N` — обрабатывает только первые `N` строк (удобно для тестирования).
-- `--verbose` — включает детализированный лог.
-- `--force` — игнорирует кэш и повторно валидирует каждую строку.
-- `--checkdate` — принудительно проверяет строки с пустой, некорректной или устаревшей датой в колонке "Check date".
-- `--rules` — после проверки копирует текст правил на отдельный лист в таблице результатов.
+CLI сначала загружает `.env` из текущей директории, затем из каталога, где лежит конфиг. Полезные флаги:
 
-### Удаленное развертывание
-1. Установите Python 3.10+ и подготовьте учетные данные (JSON сервисного аккаунта и `config.yaml`).
-2. Клонируйте репозиторий на сервер:
+| Флаг | Назначение |
+| --- | --- |
+| `--dry-run` | Не записывает данные в Google Sheets; выводит результат в stdout (JSON). |
+| `--limit N` | Обрабатывает только первые `N` строк — удобно для тестов. |
+| `--verbose` | Включает расширенный лог (prompt caching, кеш, повторные попытки). |
+| `--force` | Игнорирует локальный кеш и валидирует каждую строку заново. |
+| `--checkdate` | Переобновляет строки с пустой, некорректной или устаревшей колонкой "Check date". |
+| `--rules` | После проверки записывает `rules_text` на лист `sheets.rules_sheet_name`. |
 
-   ```bash
-   git clone https://github.com/gihar/StatusValidator.git
-   cd StatusValidator
-   ```
+### Структура результата
+Для каждой обработанной строки формируется запись:
+- `Row Number` с гиперссылкой на исходную строку (если указан `source_sheet_gid`).
+- `Project name` (гиперссылка на идентификатор) или `Source URL`, а также `Project manager`, если колонка существует.
+- `Status Value`, `Completion Date` и `Comment`, скопированные из исходной таблицы.
+- `Is Valid` (`YES`/`NO`), `Issues` (список с маркерами) и `Rewrite Suggestion`, созданные моделью.
+- `Raw LLM JSON`, сериализованный для аудита.
+- `Check date` и `Model`, отражающие время обработки и название модели.
 
-3. Создайте виртуальное окружение и установите зависимости:
+### Prompt caching и параллельная обработка
+- **SQLite-кэш:** `cache.CacheStore` хранит полный JSON-ответ LLM и переиспользует его при неизменных данных, если не указаны `--force` или `--checkdate`.
+- **Автоматическое prompt caching OpenAI:** параметр `prompt_cache_key` передается в каждый запрос. Для поддерживаемых моделей (GPT-4o, GPT-4o-mini, o1) в логах появляется строка вроде `Prompt cache hit: 2048/2500 tokens (81.9%)`.
+- **Параллельные потоки:** установка `llm.max_workers > 1` включает параллельную валидацию. Ограничения по скорости обрабатываются экспоненциальным бэк-оффом в `parallel.validate_batch_parallel`.
 
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install --upgrade pip
-   pip install -e .
-   ```
+Дополнительные материалы: `PROMPT_CACHING.md`, каталог `docs/multithreading/`.
 
-4. Настройте переменные окружения (например, `OPENAI_API_KEY`) в `.env` и убедитесь, что пути в `config.yaml` актуальны.
-5. Выполните пробный запуск:
+### Практические советы
+- Флаг `--checkdate` сравнивает значение "Check date" с текущей ISO-неделей и принудительно обновляет устаревшие записи.
+- Если настроена колонка `identifier`, строки обновляются по идентификатору без дублирования и с сохранением порядка.
+- Подбирайте `batch_size` с учетом квот API: батчи примерно по 10 строк хорошо сочетаются с prompt caching.
+- Для сторонних API задавайте `llm.providers.N.base_url_env` и `...api_key_env` (OpenRouter, Groq и другие).
+- При использовании `--rules` целевой лист очищается перед добавлением правил.
 
-   ```bash
-   venv/bin/status-validator --config /path/to/config.yaml --dry-run --limit 5
-   ```
+### Автоматизация
+Создайте обертку, которая активирует виртуальное окружение, загружает переменные окружения и запускает CLI. Примеры расписаний:
 
-### Планирование запуска
-Создайте скрипт `run_status_validator.sh`, который активирует виртуальное окружение, загружает `.env` и запускает CLI, затем выберите планировщик.
-
-#### Cron
-
+Cron:
 ```
 0 7 * * 1-5 /home/user/StatusValidator/run_status_validator.sh
 ```
 
-#### systemd timer
-Создайте `/etc/systemd/system/status-validator.service` и `/etc/systemd/system/status-validator.timer`, после чего выполните:
-
-```bash
-sudo systemctl enable --now status-validator.timer
+`systemd` timer:
 ```
+# /etc/systemd/system/status-validator.service
+[Service]
+ExecStart=/home/user/StatusValidator/run_status_validator.sh
 
-### Результаты
-Каждая проверенная строка формирует следующие колонки:
-- Номер строки и прямая ссылка на исходную запись.
-- Название проекта (из `columns.identifier`) в виде гиперссылки при наличии значения.
-- Исходный статус, комментарий и дата завершения.
-- Флаг валидации (`YES`/`NO`).
-- Список замечаний от LLM.
-- Предложение по переписыванию, соответствующее правилам.
-- Сырой JSON от LLM для аудита.
-- Отметка времени в колонке "Check date" и идентификатор модели в колонке "Model".
-
-### Prompt Caching
-
-Проект поддерживает **автоматическое prompt caching от OpenAI** для значительной экономии:
-
-- **Поддерживаемые модели:** GPT-4o, GPT-4o-mini, o1-preview, o1-mini
-- **Снижение стоимости:** ~50% на input токенах (закешированных)
-- **Ускорение:** ~20-30% быстрее ответы
-- **Без настроек:** Работает автоматически при использовании поддерживаемых моделей
-
-**Рекомендуемая конфигурация:**
-```yaml
-llm:
-  providers:
-    1:
-      model: gpt-4o              # Включает автоматическое кеширование
-      # или
-      model: gpt-4o-mini         # Дешевле, с поддержкой кеширования
+# /etc/systemd/system/status-validator.timer
+[Timer]
+OnCalendar=Mon..Fri 07:00
+Persistent=true
 ```
+После этого выполните `sudo systemctl enable --now status-validator.timer`.
 
-**Мониторинг использования кеша:**
-```bash
-status-validator --config config.yaml --verbose
-# Ищите: "Prompt cache hit: 2048/2500 tokens (81.9%)"
-```
+### Локальная разработка
+- Запускайте `pytest` (предварительно `pip install -e .[dev]`) для unit-тестов.
+- Команда `python -m compileall status_validator` выполняет быструю проверку синтаксиса модулей.
+- Логи выводятся через стандартный модуль `logging`; для диагностики добавляйте `--verbose`.
 
-Подробная информация в [PROMPT_CACHING.md](PROMPT_CACHING.md).
-
-### Локальная проверка
-
-```bash
-python -m compileall status_validator
-```
-
-При необходимости добавьте автотесты в каталог `tests/` и запустите `pytest`.
+### Дополнительная документация
+- `PROMPT_CACHING.md` — детали автоматического prompt caching и ключа `prompt_cache_key`.
+- `PROMPT_CACHE_KEY.md` — как формируется ключ кеша из `rules_text` и допустимых статусов.
+- `docs/multithreading/README.md` — архитектура, бенчмарки и FAQ по параллельной обработке.
+- `MIGRATION_TO_CACHING.md` — инструкция по миграции на prompt caching в существующих установках.

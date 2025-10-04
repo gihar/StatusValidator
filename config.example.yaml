@@ -22,6 +22,12 @@ rules_text: |
   Paste the rulebook text here. It will be forwarded to the LLM as context for validation.
 llm:
   max_retries: 3
+  max_workers: 5  # Parallel threads for LLM requests (1-10 recommended, 1=sequential)
+                  # Higher values increase throughput but may hit rate limits
+                  # Start with 5 and adjust based on your API tier:
+                  # - Free tier: 1-2
+                  # - Tier 1: 3-5 (recommended for most)
+                  # - Tier 2+: 5-10
   providers:
     # RECOMMENDATION: Use GPT-4o or GPT-4o-mini for automatic prompt caching
     # This reduces costs by ~50% on repeated prompt parts (validation rules)
