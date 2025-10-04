@@ -43,6 +43,7 @@ Status Validator automates the review of project status updates: it pulls rows f
 - Captures model feedback, including rewrite suggestions.
 - Publishes findings to a target sheet with hyperlinks to the original rows.
 - Reuses cached LLM answers while status and comment remain unchanged.
+- **Supports OpenAI automatic prompt caching** for 50% cost reduction on supported models (GPT-4o, GPT-4o-mini).
 
 ### Requirements
 - Python 3.10 or newer.
@@ -199,6 +200,33 @@ Each validated row produces the following columns:
 - Raw LLM JSON for traceability.
 - "Check date" timestamp plus the LLM model identifier.
 
+### Prompt Caching
+
+This project supports **OpenAI automatic prompt caching** for significant cost savings:
+
+- **Supported models:** GPT-4o, GPT-4o-mini, o1-preview, o1-mini
+- **Cost reduction:** ~50% on input tokens (cached)
+- **Latency improvement:** ~20-30% faster responses
+- **No configuration needed:** Works automatically when using supported models
+
+**Recommended configuration:**
+```yaml
+llm:
+  providers:
+    1:
+      model: gpt-4o              # Enables automatic caching
+      # or
+      model: gpt-4o-mini         # Cheaper with caching support
+```
+
+**Monitoring cache usage:**
+```bash
+status-validator --config config.yaml --verbose
+# Look for: "Prompt cache hit: 2048/2500 tokens (81.9%)"
+```
+
+For detailed information, see [PROMPT_CACHING.md](PROMPT_CACHING.md).
+
 ### Local Validation
 
 ```bash
@@ -218,6 +246,7 @@ Status Validator автоматизирует проверку статусов 
 - Фиксирует замечания модели, включая предложения по переписыванию текста.
 - Публикует результаты на целевом листе с гиперссылками на исходные строки.
 - Переиспользует кэшированные ответы LLM, пока статус и комментарий не меняются.
+- **Поддерживает автоматическое prompt caching от OpenAI** для снижения стоимости на 50% (GPT-4o, GPT-4o-mini).
 
 ### Требования
 - Python 3.10 или новее.
@@ -373,6 +402,33 @@ sudo systemctl enable --now status-validator.timer
 - Предложение по переписыванию, соответствующее правилам.
 - Сырой JSON от LLM для аудита.
 - Отметка времени в колонке "Check date" и идентификатор модели в колонке "Model".
+
+### Prompt Caching
+
+Проект поддерживает **автоматическое prompt caching от OpenAI** для значительной экономии:
+
+- **Поддерживаемые модели:** GPT-4o, GPT-4o-mini, o1-preview, o1-mini
+- **Снижение стоимости:** ~50% на input токенах (закешированных)
+- **Ускорение:** ~20-30% быстрее ответы
+- **Без настроек:** Работает автоматически при использовании поддерживаемых моделей
+
+**Рекомендуемая конфигурация:**
+```yaml
+llm:
+  providers:
+    1:
+      model: gpt-4o              # Включает автоматическое кеширование
+      # или
+      model: gpt-4o-mini         # Дешевле, с поддержкой кеширования
+```
+
+**Мониторинг использования кеша:**
+```bash
+status-validator --config config.yaml --verbose
+# Ищите: "Prompt cache hit: 2048/2500 tokens (81.9%)"
+```
+
+Подробная информация в [PROMPT_CACHING.md](PROMPT_CACHING.md).
 
 ### Локальная проверка
 

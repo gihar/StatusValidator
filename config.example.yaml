@@ -20,23 +20,25 @@ header_row: 1
 data_start_row: 2
 rules_text: |
   Paste the rulebook text here. It will be forwarded to the LLM as context for validation.
-data_start_row: 12
 llm:
   max_retries: 3
   providers:
+    # RECOMMENDATION: Use GPT-4o or GPT-4o-mini for automatic prompt caching
+    # This reduces costs by ~50% on repeated prompt parts (validation rules)
+    # Supported models: gpt-4o, gpt-4o-mini, o1-preview, o1-mini
     1:
       name: primary
-      model_env: OPENAI_MODEL_1
+      model_env: OPENAI_MODEL_1        # e.g., gpt-4o or gpt-4o-mini
       api_key_env: OPENAI_API_KEY_1
-      base_url_env: OPENAI_BASE_URL_1
+      base_url_env: OPENAI_BASE_URL_1  # Optional, for custom endpoints
       temperature: 0.0
-      max_output_tokens: 1024
+      max_output_tokens: 10000         # Increased for detailed feedback
     2:
       name: fallback
       model_env: OPENAI_MODEL_2
       api_key_env: OPENAI_API_KEY_2
       base_url_env: OPENAI_BASE_URL_2
       temperature: 0.0
-      max_output_tokens: 1024
-batch_size: 10
+      max_output_tokens: 10000
+batch_size: 10  # Process in batches for effective prompt caching (cache lives 5-10 min)
 cache_path: ./build/status_cache.sqlite

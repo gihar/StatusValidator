@@ -83,14 +83,23 @@ class LLMClient:
             return self._last_model_name
         return self._providers[0].model_name
 
-    def generate(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Call the chat completion endpoint and return parsed JSON content."""
+    def generate(
+        self, 
+        messages: List[Dict[str, str]], 
+        prompt_cache_key: str | None = None
+    ) -> Dict[str, Any]:
+        """Call the chat completion endpoint and return parsed JSON content.
+        
+        Args:
+            messages: Chat messages to send to the LLM
+            prompt_cache_key: Optional cache key to improve cache hit rates
+        """
 
         last_error_messages: List[Tuple[str, str]] = []
 
         for provider in self._providers:
             try:
-                payload = self._generate_with_provider(provider, messages)
+                payload = self._generate_with_provider(provider, messages, prompt_cache_key)
             except RuntimeError as exc:  # pragma: no cover - passthrough for logging
                 LOGGER.warning(
                     "LLM provider '%s' failed after %s attempts: %s",
@@ -158,23 +167,55 @@ class LLMClient:
         self,
         provider: _ProviderClient,
         messages: List[Dict[str, str]],
+        prompt_cache_key: str | None = None,
     ) -> Dict[str, Any]:
         max_attempts = self._conf.max_retries
         current_messages = [msg.copy() for msg in messages]
         last_content: str | None = None
 
         for attempt in range(1, max_attempts + 1):
+            # Prepare API call parameters
+            api_params = {
+                "model": provider.model_name,
+                "messages": current_messages,
+                "temperature": provider.temperature,
+                "max_tokens": provider.max_output_tokens,
+                "response_format": {"type": "json_object"},
+                "timeout": provider.request_timeout,
+            }
+            
+            # Add prompt_cache_key if provided (helps OpenAI optimize caching)
+            if prompt_cache_key:
+                api_params["extra_body"] = {"prompt_cache_key": prompt_cache_key}
+                if attempt == 1:
+                    LOGGER.debug("Using prompt_cache_key: %s", prompt_cache_key)
+            
             try:
-                response = provider.client.chat.completions.create(
-                    model=provider.model_name,
-                    messages=current_messages,
-                    temperature=provider.temperature,
-                    max_tokens=provider.max_output_tokens,
-                    response_format={"type": "json_object"},
-                    timeout=provider.request_timeout,
-                )
+                response = provider.client.chat.completions.create(**api_params)
             except APIError as exc:  # pragma: no cover - passthrough
                 raise RuntimeError(f"LLM request failed: {exc}") from exc
+
+            # Log prompt caching metrics if available (OpenAI GPT-4o, o1, etc.)
+            if hasattr(response, "usage") and response.usage:
+                usage = response.usage
+                total_tokens = getattr(usage, "total_tokens", 0)
+                prompt_tokens = getattr(usage, "prompt_tokens", 0)
+                
+                # Check for cached tokens (OpenAI automatic prompt caching)
+                if hasattr(usage, "prompt_tokens_details"):
+                    details = usage.prompt_tokens_details
+                    cached_tokens = getattr(details, "cached_tokens", 0)
+                    if cached_tokens > 0:
+                        cache_hit_rate = (cached_tokens / prompt_tokens * 100) if prompt_tokens > 0 else 0
+                        LOGGER.info(
+                            "Prompt cache hit: %d/%d tokens (%.1f%%) | Total: %d tokens",
+                            cached_tokens,
+                            prompt_tokens,
+                            cache_hit_rate,
+                            total_tokens,
+                        )
+                    else:
+                        LOGGER.debug("No cached tokens in this request (total: %d tokens)", total_tokens)
 
             if not response.choices:
                 raise RuntimeError("LLM response does not contain choices")

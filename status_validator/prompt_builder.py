@@ -1,23 +1,55 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from textwrap import dedent
-from typing import List
+from typing import List, Tuple
 
 from .models import StatusEntry
+
+
+def compute_cache_key(rules_text: str, allowed_statuses: List[str]) -> str:
+    """Compute a stable cache key based on validation rules.
+    
+    This key is used as prompt_cache_key parameter to help OpenAI
+    identify requests that should share the same cached context.
+    
+    Args:
+        rules_text: Full validation rules text
+        allowed_statuses: List of allowed status values
+        
+    Returns:
+        SHA256 hash (first 16 chars) of the rules configuration
+    """
+    # Combine rules and statuses into a stable string
+    combined = f"{rules_text}\n---\n{';'.join(sorted(allowed_statuses))}"
+    hash_value = sha256(combined.encode('utf-8')).hexdigest()
+    # Use first 16 chars for brevity (still unique enough)
+    return f"rules_{hash_value[:16]}"
 
 
 def build_validation_messages(
     entry: StatusEntry,
     rules_text: str,
     allowed_statuses: List[str],
-) -> List[dict]:
-    """Compose chat messages for the LLM validation call."""
+) -> Tuple[List[dict], str]:
+    """Compose chat messages for the LLM validation call.
+    
+    Optimized for OpenAI prompt caching:
+    - Static content (system prompt, rules, allowed statuses) placed first
+    - Dynamic content (row data) placed last
+    - Ensures caching of repetitive parts (>1024 tokens)
+    - Returns prompt_cache_key to improve cache hit rates
+    
+    Returns:
+        Tuple of (messages list, prompt_cache_key string)
+    """
 
     allowed_statuses_text = (
         "; ".join(allowed_statuses) if allowed_statuses else "(constraints not provided)"
     )
 
+    # STATIC PART 1: System prompt with JSON schema
     system_prompt = dedent(
         """
         You are an auditor that verifies project status updates. Assess whether the provided
@@ -47,29 +79,53 @@ def build_validation_messages(
         """
     ).strip()
 
-    payload = {
+    # STATIC PART 2: Rules and allowed statuses (this will be cached by OpenAI)
+    rules_prompt = dedent(
+        """
+        Validation rules that must be followed:
+        
+        {rules_text}
+        
+        ---
+        
+        Allowed status values:
+        {allowed_statuses_text}
+        
+        If the status column contains a value that is not in this list, it must be marked as invalid.
+        """
+    ).strip()
+    
+    rules_prompt = rules_prompt.replace("{rules_text}", rules_text)
+    rules_prompt = rules_prompt.replace("{allowed_statuses_text}", allowed_statuses_text)
+
+    # DYNAMIC PART: Row-specific data (this changes for every request)
+    row_data = {
         "status_value": entry.status_text,
         "comment": entry.comment_text,
         "completion_date": entry.completion_date,
-        "allowed_statuses": allowed_statuses,
-        "rules": rules_text,
     }
-
-    user_prompt = dedent(
+    
+    data_prompt = dedent(
         """
-        Validate the following project status according to the specified rules.
+        Validate the following project status according to the rules above.
         Provide remarks in Russian and follow the JSON schema from the system prompt.
 
-        Allowed statuses: {allowed_statuses_text}
-
         Row data:
-        {payload_json}
+        {row_json}
         """
     ).strip()
+    
+    data_prompt = data_prompt.replace("{row_json}", json.dumps(row_data, ensure_ascii=False, indent=2))
 
-    user_prompt = user_prompt.replace("{payload_json}", json.dumps(payload, ensure_ascii=False, indent=2))
-
-    return [
+    # Compute cache key for this validation context
+    cache_key = compute_cache_key(rules_text, allowed_statuses)
+    
+    # Structure optimized for caching: static content first, dynamic last
+    messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
+        {"role": "user", "content": rules_prompt},
+        {"role": "assistant", "content": "Понял правила валидации. Готов проверить данные строки."},
+        {"role": "user", "content": data_prompt},
     ]
+    
+    return messages, cache_key

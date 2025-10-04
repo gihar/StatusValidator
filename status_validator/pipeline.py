@@ -182,8 +182,8 @@ def validate_entry(
     sheets_client: GoogleSheetsClient,
     llm_client: LLMClient,
 ) -> ValidationResult:
-    messages = build_validation_messages(entry, config.rules_text, config.allowed_statuses)
-    payload = llm_client.generate(messages)
+    messages, cache_key = build_validation_messages(entry, config.rules_text, config.allowed_statuses)
+    payload = llm_client.generate(messages, prompt_cache_key=cache_key)
 
     return build_result_from_payload(entry, payload, config, sheets_client)
 
