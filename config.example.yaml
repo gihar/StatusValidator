@@ -39,6 +39,7 @@ llm:
       base_url_env: OPENAI_BASE_URL_1  # Optional, for custom endpoints
       temperature: 0.0
       max_output_tokens: 10000         # Increased for detailed feedback
+      reasoning_enabled: true          # Request deeper reasoning when the model supports it
     2:
       name: fallback
       model_env: OPENAI_MODEL_2
@@ -46,5 +47,6 @@ llm:
       base_url_env: OPENAI_BASE_URL_2
       temperature: 0.0
       max_output_tokens: 10000
+      reasoning_enabled: true
 batch_size: 10  # Process in batches for effective prompt caching (cache lives 5-10 min)
 cache_path: ./build/status_cache.sqlite

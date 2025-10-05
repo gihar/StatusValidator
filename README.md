@@ -101,6 +101,7 @@ Key fields:
 | `header_row` / `data_start_row` | 1-based positions of the header row and the first data row. `data_start_row` must be greater than `header_row`. |
 | `llm.max_retries` | Attempts per provider before falling back to the next one. |
 | `llm.max_workers` | Number of parallel threads for validation (1 = sequential). |
+| `llm.providers[].reasoning_enabled` | Request high-effort reasoning from this provider when it supports extended reasoning hints. |
 | `llm.providers` | Priority-ordered providers; keys must be consecutive integers starting from 1. Each provider can read credentials and model IDs from env vars. |
 | `batch_size` | Chunk size for processing entries. Smaller batches reduce memory usage; larger batches improve cache locality. |
 | `cache_path` | Location of the SQLite cache file. Defaults to `status_validator_cache.sqlite` next to the config when omitted. |
@@ -277,6 +278,7 @@ cache_path: ./build/status_validator_cache.sqlite
 | `header_row` / `data_start_row` | Номера строк (с единицы) для заголовка и первой строки данных; `data_start_row` должен быть больше `header_row`. |
 | `llm.max_retries` | Количество попыток для провайдера перед переходом к следующему. |
 | `llm.max_workers` | Число параллельных потоков (1 = последовательная обработка). |
+| `llm.providers[].reasoning_enabled` | Включает подсказку про «высокое усилие» для конкретного провайдера, если он поддерживает расширенное рассуждение. |
 | `llm.providers` | Провайдеры по приоритетам; ключи — последовательные числа от 1. Параметры можно считывать из переменных окружения. |
 | `batch_size` | Размер батча для обработки; большие батчи улучшают локальность кеша. |
 | `cache_path` | Путь к файлу SQLite-кеша. По умолчанию создается рядом с конфигом. |

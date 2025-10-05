@@ -25,6 +25,17 @@ _RETRY_MINIMAL_JSON_MESSAGE = (
 )
 
 
+def _is_reasoning_unsupported_error(error: BaseException) -> bool:
+    """Heuristic to detect when a provider rejects the reasoning parameter."""
+
+    message = str(error).lower()
+    if "reasoning" not in message:
+        return False
+
+    keywords = ("unsupported", "unknown", "not allowed", "invalid", "cannot")
+    return any(keyword in message for keyword in keywords)
+
+
 def _append_system_hints(messages: List[Dict[str, str]], hints: List[str]) -> List[Dict[str, str]]:
     """Return a fresh copy of messages extended with additional system hints."""
 
@@ -172,6 +183,7 @@ class LLMClient:
         max_attempts = self._conf.max_retries
         current_messages = [msg.copy() for msg in messages]
         last_content: str | None = None
+        reasoning_enabled = provider.config.reasoning_enabled
 
         for attempt in range(1, max_attempts + 1):
             # Prepare API call parameters
@@ -183,16 +195,51 @@ class LLMClient:
                 "response_format": {"type": "json_object"},
                 "timeout": provider.request_timeout,
             }
-            
+
+            extra_body: Dict[str, Any] = {}
+            if reasoning_enabled:
+                extra_body["reasoning"] = {"effort": "high"}
+
             # Add prompt_cache_key if provided (helps OpenAI optimize caching)
             if prompt_cache_key:
-                api_params["extra_body"] = {"prompt_cache_key": prompt_cache_key}
+                extra_body["prompt_cache_key"] = prompt_cache_key
                 if attempt == 1:
                     LOGGER.debug("Using prompt_cache_key: %s", prompt_cache_key)
-            
+
+            if extra_body:
+                api_params["extra_body"] = extra_body
+
             try:
                 response = provider.client.chat.completions.create(**api_params)
+            except json.JSONDecodeError as exc:
+                if reasoning_enabled:
+                    LOGGER.warning(
+                        "Provider '%s' returned a non-JSON response with reasoning enabled; retrying without reasoning (%s)",
+                        provider.display_name,
+                        exc,
+                    )
+                    reasoning_enabled = False
+                    continue
+                raise RuntimeError("LLM response could not be parsed as JSON") from exc
             except APIError as exc:  # pragma: no cover - passthrough
+                if reasoning_enabled and _is_reasoning_unsupported_error(exc):
+                    LOGGER.warning(
+                        "Disabling reasoning for provider '%s' due to error: %s",
+                        provider.display_name,
+                        exc,
+                    )
+                    reasoning_enabled = False
+                    continue
+                raise RuntimeError(f"LLM request failed: {exc}") from exc
+            except Exception as exc:  # pragma: no cover - passthrough
+                if reasoning_enabled and "reasoning" in str(exc).lower():
+                    LOGGER.warning(
+                        "Disabling reasoning for provider '%s' due to unexpected error: %s",
+                        provider.display_name,
+                        exc,
+                    )
+                    reasoning_enabled = False
+                    continue
                 raise RuntimeError(f"LLM request failed: {exc}") from exc
 
             # Log prompt caching metrics if available (OpenAI GPT-4o, o1, etc.)

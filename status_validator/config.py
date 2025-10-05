@@ -97,6 +97,10 @@ class LLMProviderConfig(BaseModel):
         gt=0,
         description="Timeout in seconds for API requests",
     )
+    reasoning_enabled: bool = Field(
+        True,
+        description="Include reasoning effort hints when calling this provider",
+    )
 
     @model_validator(mode="after")
     def _ensure_required_fields(self) -> "LLMProviderConfig":
