@@ -123,6 +123,14 @@ class LLMConfig(BaseModel):
         le=20,
         description="Number of parallel threads for LLM requests (1 = sequential, 5 recommended)",
     )
+    http_referer: str | None = Field(
+        None,
+        description="HTTP Referer header sent for OpenRouter app attribution",
+    )
+    x_title: str | None = Field(
+        None,
+        description="X-Title header sent for OpenRouter app attribution",
+    )
     providers: dict[int, LLMProviderConfig] = Field(
         ...,
         description="Mapping of priority -> provider configuration",

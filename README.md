@@ -102,6 +102,8 @@ Key fields:
 | `llm.max_retries` | Attempts per provider before falling back to the next one. |
 | `llm.max_workers` | Number of parallel threads for validation (1 = sequential). |
 | `llm.providers[].reasoning_enabled` | Request high-effort reasoning from this provider when it supports extended reasoning hints. |
+| `llm.http_referer` | Optional HTTP referer header for OpenRouter app attribution. |
+| `llm.x_title` | Optional X-Title header for OpenRouter app attribution. |
 | `llm.providers` | Priority-ordered providers; keys must be consecutive integers starting from 1. Each provider can read credentials and model IDs from env vars. |
 | `batch_size` | Chunk size for processing entries. Smaller batches reduce memory usage; larger batches improve cache locality. |
 | `cache_path` | Location of the SQLite cache file. Defaults to `status_validator_cache.sqlite` next to the config when omitted. |
@@ -279,6 +281,8 @@ cache_path: ./build/status_validator_cache.sqlite
 | `llm.max_retries` | Количество попыток для провайдера перед переходом к следующему. |
 | `llm.max_workers` | Число параллельных потоков (1 = последовательная обработка). |
 | `llm.providers[].reasoning_enabled` | Включает подсказку про «высокое усилие» для конкретного провайдера, если он поддерживает расширенное рассуждение. |
+| `llm.http_referer` | Необязательный заголовок HTTP Referer для App Attribution в OpenRouter. |
+| `llm.x_title` | Необязательный заголовок X-Title для App Attribution в OpenRouter. |
 | `llm.providers` | Провайдеры по приоритетам; ключи — последовательные числа от 1. Параметры можно считывать из переменных окружения. |
 | `batch_size` | Размер батча для обработки; большие батчи улучшают локальность кеша. |
 | `cache_path` | Путь к файлу SQLite-кеша. По умолчанию создается рядом с конфигом. |

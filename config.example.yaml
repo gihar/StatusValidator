@@ -28,6 +28,8 @@ llm:
                   # - Free tier: 1-2
                   # - Tier 1: 3-5 (recommended for most)
                   # - Tier 2+: 5-10
+  http_referer: https://github.com/timchenko/StatusValidator
+  x_title: StatusValidator
   providers:
     # RECOMMENDATION: Use GPT-4o or GPT-4o-mini for automatic prompt caching
     # This reduces costs by ~50% on repeated prompt parts (validation rules)

@@ -160,11 +160,21 @@ class LLMClient:
         if not base_url and provider_conf.base_url_env:
             base_url = os.environ.get(provider_conf.base_url_env)
 
-        client = OpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            organization=provider_conf.organization,
-        )
+        client_kwargs: Dict[str, Any] = {
+            "api_key": api_key,
+            "base_url": base_url,
+            "organization": provider_conf.organization,
+        }
+
+        default_headers: Dict[str, str] = {}
+        if self._conf.http_referer:
+            default_headers["HTTP-Referer"] = self._conf.http_referer
+        if self._conf.x_title:
+            default_headers["X-Title"] = self._conf.x_title
+        if default_headers:
+            client_kwargs["default_headers"] = default_headers
+
+        client = OpenAI(**client_kwargs)
 
         return _ProviderClient(
             priority=priority,
