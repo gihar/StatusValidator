@@ -36,6 +36,17 @@ def _is_reasoning_unsupported_error(error: BaseException) -> bool:
     return any(keyword in message for keyword in keywords)
 
 
+def _is_prompt_cache_key_unsupported_error(error: BaseException) -> bool:
+    """Heuristic to detect when a provider rejects the prompt_cache_key parameter."""
+
+    message = str(error).lower()
+    if "prompt_cache_key" not in message:
+        return False
+
+    keywords = ("unsupported", "unknown", "not allowed", "invalid", "cannot")
+    return any(keyword in message for keyword in keywords)
+
+
 def _append_system_hints(messages: List[Dict[str, str]], hints: List[str]) -> List[Dict[str, str]]:
     """Return a fresh copy of messages extended with additional system hints."""
 
@@ -194,6 +205,7 @@ class LLMClient:
         current_messages = [msg.copy() for msg in messages]
         last_content: str | None = None
         reasoning_enabled = provider.config.reasoning_enabled
+        prompt_cache_enabled = prompt_cache_key is not None
 
         for attempt in range(1, max_attempts + 1):
             # Prepare API call parameters
@@ -210,8 +222,8 @@ class LLMClient:
             if reasoning_enabled:
                 extra_body["reasoning"] = {"effort": "high"}
 
-            # Add prompt_cache_key if provided (helps OpenAI optimize caching)
-            if prompt_cache_key:
+            # Add prompt_cache_key if provided and enabled (helps OpenAI optimize caching)
+            if prompt_cache_key and prompt_cache_enabled:
                 extra_body["prompt_cache_key"] = prompt_cache_key
                 if attempt == 1:
                     LOGGER.debug("Using prompt_cache_key: %s", prompt_cache_key)
@@ -240,6 +252,14 @@ class LLMClient:
                     )
                     reasoning_enabled = False
                     continue
+                if prompt_cache_enabled and _is_prompt_cache_key_unsupported_error(exc):
+                    LOGGER.warning(
+                        "Disabling prompt_cache_key for provider '%s' due to error: %s",
+                        provider.display_name,
+                        exc,
+                    )
+                    prompt_cache_enabled = False
+                    continue
                 raise RuntimeError(f"LLM request failed: {exc}") from exc
             except Exception as exc:  # pragma: no cover - passthrough
                 if reasoning_enabled and "reasoning" in str(exc).lower():
@@ -249,6 +269,14 @@ class LLMClient:
                         exc,
                     )
                     reasoning_enabled = False
+                    continue
+                if prompt_cache_enabled and "prompt_cache_key" in str(exc).lower():
+                    LOGGER.warning(
+                        "Disabling prompt_cache_key for provider '%s' due to unexpected error: %s",
+                        provider.display_name,
+                        exc,
+                    )
+                    prompt_cache_enabled = False
                     continue
                 raise RuntimeError(f"LLM request failed: {exc}") from exc
 
