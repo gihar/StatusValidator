@@ -323,7 +323,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             entry.row_number
                         )
 
-                    LOGGER.debug(
+                    LOGGER.info(
                         "Row %s: Check date value='%s'",
                         entry.row_number,
                         existing_check_date_value or "(empty)",
@@ -332,7 +332,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     force_reason: str | None = None
                     if not (existing_check_date_value or "").strip():
                         force_reason = "missing Check date"
-                        LOGGER.debug(
+                        LOGGER.info(
                             "Row %s: Check date is missing or empty",
                             entry.row_number,
                         )
@@ -342,7 +342,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             force_reason = (
                                 f"unrecognized Check date '{existing_check_date_value}'"
                             )
-                            LOGGER.debug(
+                            LOGGER.warning(
                                 "Row %s: Failed to parse Check date '%s'",
                                 entry.row_number,
                                 existing_check_date_value,
@@ -352,14 +352,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                             and parsed_check_date < current_week_start
                         ):
                             force_reason = f"stale Check date '{existing_check_date_value}'"
-                            LOGGER.debug(
+                            LOGGER.info(
                                 "Row %s: Check date comparison - parsed_date=%s, week_start=%s, is_stale=True",
                                 entry.row_number,
                                 parsed_check_date.strftime("%d.%m.%Y %H:%M:%S"),
                                 current_week_start.strftime("%d.%m.%Y %H:%M:%S"),
                             )
                         else:
-                            LOGGER.debug(
+                            LOGGER.info(
                                 "Row %s: Check date is fresh - parsed_date=%s, week_start=%s, is_stale=False",
                                 entry.row_number,
                                 parsed_check_date.strftime("%d.%m.%Y %H:%M:%S"),
