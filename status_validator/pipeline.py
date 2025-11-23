@@ -182,6 +182,17 @@ def validate_entry(
     sheets_client: GoogleSheetsClient,
     llm_client: LLMClient,
 ) -> ValidationResult:
+    if entry.status_text == "-":
+        # Skip validation for this status
+        return ValidationResult(
+            row_number=entry.row_number,
+            source_url=sheets_client.build_row_url(entry.row_number),
+            is_valid=True,
+            issues="",
+            rewrite_suggestion="",
+            raw_response={"skipped": True, "reason": "status is dash"},
+        )
+
     messages, cache_key = build_validation_messages(entry, config.rules_text, config.allowed_statuses)
     payload = llm_client.generate(messages, prompt_cache_key=cache_key)
 
