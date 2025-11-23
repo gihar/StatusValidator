@@ -281,6 +281,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         current_week_start = (
             now - timedelta(days=now.weekday())
         ).replace(hour=0, minute=0, second=0, microsecond=0)
+        LOGGER.info(
+            "Check date mode enabled: current time=%s, week start=%s",
+            now.strftime("%d.%m.%Y %H:%M:%S"),
+            current_week_start.strftime("%d.%m.%Y %H:%M:%S"),
+        )
     try:
         for start in range(0, len(entries), config.batch_size):
             batch = entries[start : start + config.batch_size]
@@ -318,27 +323,57 @@ def main(argv: Sequence[str] | None = None) -> int:
                             entry.row_number
                         )
 
+                    LOGGER.debug(
+                        "Row %s: Check date value='%s'",
+                        entry.row_number,
+                        existing_check_date_value or "(empty)",
+                    )
+
                     force_reason: str | None = None
                     if not (existing_check_date_value or "").strip():
                         force_reason = "missing Check date"
+                        LOGGER.debug(
+                            "Row %s: Check date is missing or empty",
+                            entry.row_number,
+                        )
                     else:
                         parsed_check_date = _parse_check_date_value(existing_check_date_value)
                         if parsed_check_date is None:
                             force_reason = (
                                 f"unrecognized Check date '{existing_check_date_value}'"
                             )
+                            LOGGER.debug(
+                                "Row %s: Failed to parse Check date '%s'",
+                                entry.row_number,
+                                existing_check_date_value,
+                            )
                         elif (
                             current_week_start is not None
                             and parsed_check_date < current_week_start
                         ):
                             force_reason = f"stale Check date '{existing_check_date_value}'"
+                            LOGGER.debug(
+                                "Row %s: Check date comparison - parsed_date=%s, week_start=%s, is_stale=True",
+                                entry.row_number,
+                                parsed_check_date.strftime("%d.%m.%Y %H:%M:%S"),
+                                current_week_start.strftime("%d.%m.%Y %H:%M:%S"),
+                            )
+                        else:
+                            LOGGER.debug(
+                                "Row %s: Check date is fresh - parsed_date=%s, week_start=%s, is_stale=False",
+                                entry.row_number,
+                                parsed_check_date.strftime("%d.%m.%Y %H:%M:%S"),
+                                current_week_start.strftime("%d.%m.%Y %H:%M:%S") if current_week_start else "N/A",
+                            )
 
                     if force_reason is not None:
                         should_force_current = True
                         LOGGER.info(
-                            "Forcing revalidation for row %s due to %s",
+                            "Forcing revalidation for row %s due to %s (Check date='%s', week start=%s)",
                             entry.row_number,
                             force_reason,
+                            existing_check_date_value or "(empty)",
+                            current_week_start.strftime("%d.%m.%Y %H:%M:%S") if current_week_start else "N/A",
                         )
 
                 comment_hash = compute_comment_hash(entry.comment_text)
